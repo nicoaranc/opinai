@@ -1,0 +1,24 @@
+# Base de datos local de desarrollo.
+# El back y el front se ejecutan con `npm run start:dev` / `npm run dev` (hot reload).
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: opinai_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opinai
+      POSTGRES_PASSWORD: opinai
+      POSTGRES_DB: opinai
+    ports:
+      # 5433 en el host porque el 5432 ya lo usa otro proyecto (wallet_db)
+      - "5433:5432"
+    volumes:
+      - opinai_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opinai -d opinai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  opinai_pgdata:

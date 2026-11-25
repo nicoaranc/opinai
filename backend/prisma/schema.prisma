@@ -1,0 +1,289 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum MediaType {
+  MOVIE
+  SERIES
+  ALBUM
+  TRACK
+  GAME
+}
+
+enum CreatorKind {
+  PERSON // director, solista, guionista...
+  GROUP // banda, dúo
+  COMPANY // estudio de videojuegos, distribuidora
+}
+
+enum CreditRole {
+  // Cine y series
+  DIRECTOR
+  SHOWRUNNER
+  WRITER
+  // Música
+  PRIMARY_ARTIST
+  FEATURED_ARTIST
+  PRODUCER
+  // Videojuegos
+  DEVELOPER
+  PUBLISHER
+}
+
+enum SeriesStatus {
+  RETURNING
+  ENDED
+  CANCELED
+  IN_PRODUCTION
+}
+
+enum AlbumType {
+  ALBUM
+  EP
+  SINGLE
+  COMPILATION
+  LIVE
+}
+
+// ─────────────────────────────────────────────
+// Usuarios
+// ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  displayName  String?
+  avatarUrl    String?
+  bio          String?
+  role         UserRole @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reviews Review[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// Media: tabla común para todo lo reseñable
+// ─────────────────────────────────────────────
+
+model Media {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  type          MediaType
+  slug          String    @unique
+  title         String
+  originalTitle String?
+  synopsis      String?
+  releaseDate   DateTime? @db.Date
+  coverUrl      String?
+  backdropUrl   String?
+  language      String?   @db.VarChar(8) // ISO 639-1, p. ej. "es"
+  country       String?   @db.VarChar(2) // ISO 3166-1, p. ej. "CL"
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Detalles según el tipo (1:1; solo existe el que corresponde a `type`)
+  movie  MovieDetails?
+  series SeriesDetails?
+  album  AlbumDetails?
+  track  TrackDetails?
+  game   GameDetails?
+
+  // Música: un álbum tiene canciones y una canción puede estar en varios álbumes
+  albumTracks     AlbumTrack[] @relation("AlbumTracks")
+  appearsOnAlbums AlbumTrack[] @relation("TrackAppearances")
+
+  genres      Genre[]
+  credits     Credit[]
+  reviews     Review[]
+  externalIds ExternalId[]
+
+  @@index([type, releaseDate])
+  @@index([title])
+  @@map("media")
+}
+
+model MovieDetails {
+  mediaId        String  @id @db.Uuid
+  runtimeMinutes Int?
+  ageRating      String? // "PG-13", "+14"...
+  trailerUrl     String?
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@map("movie_details")
+}
+
+model SeriesDetails {
+  mediaId       String        @id @db.Uuid
+  status        SeriesStatus?
+  seasonsCount  Int?
+  episodesCount Int?
+  endDate       DateTime?     @db.Date
+  network       String? // HBO, Netflix...
+  ageRating     String?
+  trailerUrl    String?
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@map("series_details")
+}
+
+model AlbumDetails {
+  mediaId   String    @id @db.Uuid
+  albumType AlbumType @default(ALBUM)
+  label     String? // sello discográfico
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@map("album_details")
+}
+
+model TrackDetails {
+  mediaId         String  @id @db.Uuid
+  durationSeconds Int?
+  explicit        Boolean @default(false)
+  previewUrl      String?
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@map("track_details")
+}
+
+model GameDetails {
+  mediaId    String   @id @db.Uuid
+  platforms  String[] // ["PC", "PS5", "Switch"]
+  gameModes  String[] // ["Un jugador", "Multijugador"]
+  trailerUrl String?
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@map("game_details")
+}
+
+// Lista de canciones de un álbum (ambos son Media: ALBUM y TRACK)
+model AlbumTrack {
+  albumId     String @db.Uuid
+  trackId     String @db.Uuid
+  discNumber  Int    @default(1)
+  trackNumber Int
+
+  album Media @relation("AlbumTracks", fields: [albumId], references: [id], onDelete: Cascade)
+  track Media @relation("TrackAppearances", fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@id([albumId, trackId])
+  @@unique([albumId, discNumber, trackNumber])
+  @@index([trackId])
+  @@map("album_tracks")
+}
+
+// ─────────────────────────────────────────────
+// Creadores y créditos
+// ─────────────────────────────────────────────
+
+model Creator {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  kind      CreatorKind
+  slug      String      @unique
+  name      String
+  bio       String?
+  imageUrl  String?
+  country   String?     @db.VarChar(2)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  credits Credit[]
+
+  @@index([name])
+  @@map("creators")
+}
+
+// Une Media con Creator indicando el rol (director, artista, desarrollador...)
+model Credit {
+  id        String     @id @default(uuid(7)) @db.Uuid
+  mediaId   String     @db.Uuid
+  creatorId String     @db.Uuid
+  role      CreditRole
+  position  Int        @default(0) // orden de aparición
+
+  media   Media   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, creatorId, role])
+  @@index([creatorId, role])
+  @@map("credits")
+}
+
+// ─────────────────────────────────────────────
+// Géneros
+// ─────────────────────────────────────────────
+
+model Genre {
+  id   String @id @default(uuid(7)) @db.Uuid
+  slug String @unique
+  name String
+
+  media Media[]
+
+  @@map("genres")
+}
+
+// ─────────────────────────────────────────────
+// Reseñas y valoraciones
+// ─────────────────────────────────────────────
+
+// Una por usuario y obra. Sin `body` es solo una valoración.
+model Review {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  userId           String   @db.Uuid
+  mediaId          String   @db.Uuid
+  rating           Int      @db.SmallInt // 1–10 (equivale a 0,5–5 estrellas)
+  title            String?
+  body             String?
+  containsSpoilers Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mediaId])
+  @@index([mediaId, createdAt])
+  @@map("reviews")
+}
+
+// ─────────────────────────────────────────────
+// IDs externos (para cuando se integren APIs)
+// ─────────────────────────────────────────────
+
+model ExternalId {
+  id         String @id @default(uuid(7)) @db.Uuid
+  mediaId    String @db.Uuid
+  provider   String // "tmdb", "imdb", "musicbrainz", "igdb"...
+  externalId String
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+  @@unique([mediaId, provider])
+  @@map("external_ids")
+}
