@@ -1,7 +1,7 @@
 # Arquitectura de opinai
 
 > Documento vivo: se actualiza cada vez que se agrega o cambia una parte del sistema.
-> Última actualización: 2026-11-25
+> Última actualización: 2026-11-25 (configuración, validación, errores y seed)
 
 opinai es una plataforma de reseñas y valoraciones de **películas, series, música (álbumes y canciones) y videojuegos**.
 
@@ -42,8 +42,11 @@ flowchart LR
 | Backend | NestJS (ESM) + TypeScript | Nest 12, TS 6 |
 | ORM | Prisma con driver adapter `@prisma/adapter-pg` | 7.10.1 |
 | Base de datos | PostgreSQL | 17 (local) |
+| Configuración | `@nestjs/config` + Zod | 12.1 / 4 |
+| Validación | `StandardSchemaValidationPipe` (Nest) + Zod | |
 | Health checks | `@nestjs/terminus` | 12.2 |
 | Tests | Vitest | 4 |
+| Scripts TS (seed) | tsx | 4 |
 | Lint / formato | oxlint / Prettier | |
 | Runtime | Node.js | 22 |
 
@@ -58,10 +61,13 @@ opinai/
     ├── prisma.config.ts       ← config de la CLI de Prisma (schema, migraciones, URL)
     ├── prisma/
     │   ├── schema.prisma      ← modelos
+    │   ├── seed.ts            ← datos de ejemplo (npm run db:seed)
     │   └── migrations/        ← migraciones SQL versionadas
     ├── src/
-    │   ├── main.ts            ← arranque (carga .env, levanta Nest en PORT)
-    │   ├── app.module.ts      ← módulo raíz
+    │   ├── main.ts            ← arranque: CORS, validación global, PORT
+    │   ├── app.module.ts      ← módulo raíz (config, filtro de errores)
+    │   ├── config/env.ts      ← esquema Zod de las variables de entorno
+    │   ├── common/filters/    ← AllExceptionsFilter (formato de errores)
     │   ├── prisma/            ← PrismaModule (global) + PrismaService
     │   ├── health/            ← GET /health
     │   └── generated/prisma/  ← cliente Prisma generado (no se versiona)
@@ -100,16 +106,25 @@ NestJS en modo **ESM**: los imports relativos terminan en `.js`.
 
 | Módulo | Responsabilidad |
 |---|---|
-| `AppModule` | Raíz. Importa el resto. Incluye `AppController` de ejemplo (`GET /`). |
-| `PrismaModule` | **Global**. Expone `PrismaService` (un `PrismaClient` con el adapter `pg`, que conecta usando `DATABASE_URL`). |
+| `AppModule` | Raíz. Importa el resto, registra el filtro global de errores e incluye `AppController` de ejemplo (`GET /`). |
+| `ConfigModule` | **Global**. Carga `.env` y valida las variables con el esquema Zod de `src/config/env.ts`. Si falta una obligatoria o es inválida, la app no arranca. Se lee con `ConfigService<Env, true>`. |
+| `PrismaModule` | **Global**. Expone `PrismaService` (un `PrismaClient` con el adapter `pg`, que conecta usando `DATABASE_URL` desde `ConfigService`). |
 | `HealthModule` | `GET /health` con Terminus: hace ping a la base de datos (`SELECT 1`, timeout de 3 s). |
 | `ObserveModule` | Telemetría de NestJS Observe, incluida en la plantilla. Inactiva hasta que se vincule con `npx @nestjs/observe link`. |
+
+### Transversal (configurado en `main.ts` y `AppModule`)
+
+- **Validación**: `StandardSchemaValidationPipe` global. Solo valida los parámetros que declaran un esquema, por ejemplo `@Body({ schema: createReviewSchema })`. Los esquemas son de Zod y el tipo del DTO se infiere con `z.infer`. Si la validación falla, responde `400` con un mensaje por campo (`"rating: Too big..."`).
+- **Errores**: `AllExceptionsFilter` (`APP_FILTER`) da a todas las respuestas de error la misma forma (ver [§7](#7-api)). Traduce errores de Prisma: `P2002` (único duplicado) → `409`, `P2003` (FK inválida) → `409`, `P2025` (no encontrado) → `404`. Cualquier otro error responde `500` con un mensaje genérico y se registra en el log, sin exponer detalles.
+- **CORS**: solo se aceptan los orígenes de `CORS_ORIGINS`, con `credentials: true`.
+- **Shutdown hooks** activados, para que Prisma cierre conexiones cuando Render detiene el servicio.
 
 ### Prisma 7
 
 - `schema.prisma` no lleva URL. La CLI la toma de `prisma.config.ts` (`DIRECT_URL`) y la app la pasa al adapter en `PrismaService` (`DATABASE_URL`).
 - El cliente se genera en `src/generated/prisma` con el generator `prisma-client` (ESM). Se importa desde `../generated/prisma/client.js`.
 - `migrate dev` no regenera el cliente. Después de migrar hay que ejecutar `npm run db:generate`.
+- **Seed** (`prisma/seed.ts`, se ejecuta con tsx): **borra todos los datos** y crea 3 usuarios (`admin`, `ana`, `bruno`), 7 géneros, 5 creadores, 11 obras (2 películas, 1 serie, 1 álbum con 6 canciones, 1 juego) y 8 reseñas. Se puede repetir sin problemas y se niega a correr con `NODE_ENV=production`. Los usuarios del seed tienen un `passwordHash` de relleno y no pueden iniciar sesión.
 
 ### Scripts
 
@@ -122,6 +137,7 @@ NestJS en modo **ESM**: los imports relativos terminan en `.js`.
 | `db:migrate` | Crea y aplica una migración (desarrollo) |
 | `db:deploy` | Aplica las migraciones pendientes (producción) |
 | `db:generate` | Regenera el cliente Prisma |
+| `db:seed` | Reinicia la base con los datos de ejemplo |
 | `db:studio` | Interfaz web para ver y editar datos |
 
 ## 6. Modelo de datos
@@ -164,15 +180,33 @@ erDiagram
 | `GET` | `/` | Ejemplo de la plantilla | `Hello World!` |
 | `GET` | `/health` | Estado del servicio y de la base de datos | `200` `{ status: "ok", info: { database: { status: "up" } } }` · `503` si la base no responde |
 
+### Formato de errores
+
+Todas las respuestas de error tienen esta forma:
+
+```json
+{
+  "statusCode": 404,
+  "error": "Not Found",
+  "message": "Recurso no encontrado",
+  "path": "/media/abc",
+  "timestamp": "2026-11-25T23:05:14.569Z"
+}
+```
+
+`message` es un string, o un array de strings cuando son errores de validación (uno por campo).
+
 ## 8. Variables de entorno
 
-Backend (`backend/.env`, plantilla en `backend/.env.example`):
+Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arrancar (`src/config/env.ts`), excepto `DIRECT_URL`, que solo usa la CLI de Prisma.
 
 | Variable | Uso | Local | Supabase |
 |---|---|---|---|
 | `DATABASE_URL` | Conexión de la app | `postgresql://opinai:opinai@localhost:5433/opinai` | Transaction pooler (6543) |
 | `DIRECT_URL` | Migraciones (CLI de Prisma) | la misma | Session pooler (5432) |
-| `PORT` | Puerto HTTP | `3000` | lo asigna Render |
+| `NODE_ENV` | `development`, `production` o `test` (por defecto `development`) | — | `production` |
+| `PORT` | Puerto HTTP (por defecto `3000`) | `3000` | lo asigna Render |
+| `CORS_ORIGINS` | Orígenes permitidos, separados por comas (por defecto `http://localhost:5173`) | `http://localhost:5173` | URL del front en Render |
 | `OBSERVE_APP_KEY` / `OBSERVE_APP_SECRET` | NestJS Observe (opcional) | — | — |
 
 ## 9. Decisiones de diseño
@@ -184,6 +218,8 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`):
 - **Sin Docker para back y front en producción.** Render los ejecuta de forma nativa; Docker solo se usa para la base de datos local.
 - **APIs externas (futuro): importar bajo demanda y guardar en la base**, identificando cada obra por `ExternalId`, en vez de consultar la API en cada petición.
 - **El rango de `rating` (1–10) se valida en la aplicación.** Prisma no declara restricciones `CHECK`.
+- **Validación con Zod (Standard Schema) en vez de `class-validator`.** Es el enfoque nativo de Nest 12: sin clases ni decoradores, y el mismo esquema da el tipo TypeScript. También se usa para las variables de entorno.
+- **Los errores 500 nunca exponen detalles al cliente.** Se registran en el log del servidor.
 
 ## 10. Estado y próximos pasos
 
@@ -191,6 +227,8 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`):
 - [x] Back NestJS con Prisma y Postgres local en Docker
 - [x] Modelos de datos y migración inicial
 - [x] `GET /health`
+- [x] Configuración validada, validación global con Zod, CORS y formato uniforme de errores
+- [x] Seed con datos de ejemplo
 
 **Pendiente**
 - [ ] Frontend (React + Vite)
