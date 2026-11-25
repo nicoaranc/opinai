@@ -11,19 +11,18 @@ import {
   SeriesStatus,
   UserRole,
 } from '../src/generated/prisma/client.js';
+import { PasswordService } from '../src/auth/password.service.js';
+import { assertSafeToSeed } from './seed-guard.js';
 
-if (process.env.NODE_ENV === 'production') {
-  throw new Error(
-    'El seed borra todos los datos: no se ejecuta en producción.',
-  );
-}
+// Solo contra una base local y nunca en producción (ver seed-guard.ts)
+assertSafeToSeed(process.env);
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
 
-// Los usuarios del seed no pueden iniciar sesión: la autenticación aún no existe.
-const NO_LOGIN = '!seed-no-login';
+// Contraseña de todos los usuarios de prueba (solo para desarrollo local)
+export const SEED_PASSWORD = 'opinai123';
 const date = (iso: string) => new Date(`${iso}T00:00:00Z`);
 
 const GENRES = {
@@ -43,6 +42,7 @@ async function reset() {
   await prisma.media.deleteMany();
   await prisma.creator.deleteMany();
   await prisma.genre.deleteMany();
+  await prisma.session.deleteMany();
   await prisma.user.deleteMany();
 }
 
@@ -50,6 +50,8 @@ async function main() {
   await reset();
 
   // ── Usuarios ────────────────────────────────
+  // Mismos parámetros de argon2 que la app
+  const passwordHash = await new PasswordService().hash(SEED_PASSWORD);
   const user = (
     username: string,
     displayName: string,
@@ -63,7 +65,7 @@ async function main() {
         displayName,
         bio,
         role,
-        passwordHash: NO_LOGIN,
+        passwordHash,
       },
     });
   const admin = await user('admin', 'Admin', undefined, UserRole.ADMIN);

@@ -1,9 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { createObserveModule } from '@nestjs/observe';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { AuthModule } from './auth/auth.module.js';
+import { OriginGuard } from './auth/guards/origin.guard.js';
+import { SessionGuard } from './auth/guards/session.guard.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { envSchema } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
@@ -14,7 +18,10 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validationSchema: envSchema }),
+    // Límite general: 100 peticiones por minuto por IP
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
+    AuthModule,
     HealthModule,
     // Distributed tracing, auto-correlated logs, request/job metrics, error
     // telemetry, alarms, and more — out of the box. Sign up at https://observe.nestjs.com,
@@ -29,6 +36,10 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
   providers: [
     AppService,
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    // Los guards globales se ejecutan en este orden
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: OriginGuard },
+    { provide: APP_GUARD, useClass: SessionGuard },
   ],
 })
 export class AppModule {}

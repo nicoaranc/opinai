@@ -4,6 +4,8 @@ import {
   HealthCheckService,
   PrismaHealthIndicator,
 } from '@nestjs/terminus';
+import { SkipThrottle } from '@nestjs/throttler';
+import { Public } from '../auth/decorators/public.decorator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 @Controller('health')
@@ -16,6 +18,8 @@ export class HealthController {
 
   // 200 si todo está bien, 503 si la base de datos no responde
   @Get()
+  @Public()
+  @SkipThrottle()
   @HealthCheck()
   check() {
     return this.health.check([
