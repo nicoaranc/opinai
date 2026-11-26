@@ -1,7 +1,7 @@
 # Arquitectura de opinai
 
 > Documento vivo: se actualiza cada vez que se agrega o cambia una parte del sistema.
-> Última actualización: 2026-11-26 (API REST de catálogo, reseñas y usuarios; nota opcional)
+> Última actualización: 2026-11-26 (frontend: página principal, login y registro)
 
 opinai es una plataforma de reseñas y valoraciones de **películas, series, música (álbumes y canciones) y videojuegos**.
 
@@ -11,7 +11,7 @@ opinai es una plataforma de reseñas y valoraciones de **películas, series, mú
 2. [Stack](#2-stack)
 3. [Estructura del repositorio](#3-estructura-del-repositorio)
 4. [Entornos](#4-entornos)
-5. [Backend](#5-backend)
+5. [Backend](#5-backend) · [Frontend](#5b-frontend)
 6. [Modelo de datos](#6-modelo-de-datos)
 7. [API](#7-api)
 8. [Variables de entorno](#8-variables-de-entorno)
@@ -39,7 +39,7 @@ flowchart LR
 
 | Capa | Tecnología | Versión |
 |---|---|---|
-| Frontend | React + Vite + TypeScript | _pendiente_ |
+| Frontend | React + Vite + TypeScript (sin router ni librería de UI por ahora) | React 19, Vite 8, TS 7 |
 | Backend | NestJS (ESM, Express) + TypeScript | Nest 12, TS 6 |
 | ORM | Prisma con driver adapter `@prisma/adapter-pg` | 7.10.1 |
 | Base de datos | PostgreSQL | 17 (local) |
@@ -62,6 +62,17 @@ opinai/
 ├── architecture.md            ← este documento
 ├── docker-compose.yml         ← Postgres para desarrollo local
 ├── .gitignore
+├── frontend/
+│   ├── vite.config.ts         ← puerto 5173 fijo y proxy de /api al back
+│   ├── index.html
+│   ├── public/favicon.svg
+│   └── src/
+│       ├── main.tsx / App.tsx ← entrada: AuthProvider + Header + HomePage
+│       ├── index.css          ← estilos globales y variables de color (claro/oscuro)
+│       ├── api/client.ts      ← fetch a /api con manejo de errores del back
+│       ├── auth/              ← contexto de sesión (useAuth) y AuthProvider
+│       ├── components/        ← Header, AuthDialog (login y registro)
+│       └── pages/             ← HomePage
 └── backend/
     ├── prisma.config.ts       ← config de la CLI de Prisma (schema, migraciones, seed, URL)
     ├── prisma/
@@ -85,7 +96,6 @@ opinai/
     └── test/                  ← tests e2e
 ```
 
-El frontend irá en `frontend/` cuando se cree.
 
 ## 4. Entornos
 
@@ -95,7 +105,7 @@ El frontend irá en `frontend/` cuando se cree.
 |---|---|---|
 | PostgreSQL | Docker (`docker compose up -d`) | `localhost:5433` (el 5432 lo usa otro proyecto) |
 | Backend | `npm run start:dev` en `backend/` (hot reload) | `http://localhost:3000/api` |
-| Frontend | _pendiente_ (`npm run dev`, con proxy de `/api` a `:3000`) | `http://localhost:5173` |
+| Frontend | `npm run dev` en `frontend/` (hot reload, proxy de `/api` a `:3000`) | `http://localhost:5173` |
 
 Solo la base de datos está dockerizada. El back y el front corren con Node directamente para tener hot reload.
 
@@ -208,6 +218,29 @@ handler(@CurrentUser() user: PublicUser) {}
 | `db:generate` | Regenera el cliente Prisma |
 | `db:seed` | Reinicia la base con los datos de ejemplo |
 | `db:studio` | Interfaz web para ver y editar datos |
+
+## 5b. Frontend
+
+SPA de React con Vite. Por ahora tiene **solo la página principal, sin datos del catálogo**, el **registro**, y el **inicio y cierre de sesión**.
+
+### Cómo habla con el back
+
+- `api()` (`src/api/client.ts`) hace `fetch` a `/api/...` **en el mismo origen** con `credentials: 'same-origin'`, así que la cookie de sesión viaja sola. Nunca se usa la URL del back directamente.
+- En local, el proxy de Vite reenvía `/api` a `http://localhost:3000`. El puerto 5173 es fijo (`strictPort`) porque el back solo acepta escrituras desde los orígenes de `CORS_ORIGINS`.
+- Si la respuesta no es correcta, lanza `ApiError` con el `status` y el `message` del back (los errores de validación se unen en líneas). Si no hay conexión, `status` 0 y "No se pudo conectar con el servidor".
+
+### Sesión
+
+- `AuthProvider` (`src/auth/AuthProvider.tsx`) llama a `GET /api/auth/me` al cargar: `200` → `authenticated`, `401` → `anonymous`. Mientras tanto el estado es `loading` y la cabecera no muestra botones, para evitar un parpadeo.
+- `useAuth()` da `{ state, login, register, logout }`. `login` llama a `POST /api/auth/login` y `register` a `POST /api/auth/register` (que deja la sesión iniciada); ambos guardan el usuario. `logout` llama a `POST /api/auth/logout` (si la sesión ya había caducado, igual sale).
+- La cookie es `httpOnly`: el front nunca ve el token, solo sabe quién es el usuario por `/auth/me`.
+
+### Interfaz
+
+- `Header`: marca, y "Iniciar sesión" y "Crear cuenta", o el nombre del usuario con "Cerrar sesión".
+- `AuthDialog`: `<dialog>` nativo con dos modos, login y registro, que se alternan desde la misma ventana (el email se conserva). Gestiona el foco y se cierra con Escape o clic fuera. El registro pide email, nombre de usuario, contraseña y nombre visible opcional; el navegador valida las mismas reglas que el back (usuario de 3 a 30 caracteres `A-Z a-z 0-9 _`, contraseña de 8 a 128). Muestra el mensaje de error del back (`400` por campo, `401`, `409` email o usuario en uso, `429`).
+- `HomePage`: titular y descripción; saluda al usuario si hay sesión.
+- Estilos en `index.css` con variables de color para tema claro y oscuro (`prefers-color-scheme`).
 
 ## 6. Modelo de datos
 
@@ -353,6 +386,7 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - **Sesiones hechas a mano con piezas maduras** (argon2, cookie-parser, throttler) en vez de `@nestjs/authentication`, porque ese paquete está en versión 0.1.x y su API aún puede cambiar. Si se estabiliza, se puede evaluar migrar.
 - **El front y el back comparten origen** (proxy de Vite en local, rewrite de Render en producción). Los subdominios de `onrender.com` cuentan como sitios distintos, así que sin esto la cookie `SameSite=Lax` no se enviaría.
 - **Seguro por defecto**: toda ruta nueva exige sesión salvo que se marque `@Public()`.
+- **El front empieza sin dependencias extra** (sin router, sin librería de estado ni de UI): solo hay una página. Se agregarán cuando haya más pantallas.
 - **Fallar al arrancar antes que arrancar inseguro.** `NODE_ENV` es obligatoria porque de ella dependen la cookie segura y otras protecciones, y `CORS_ORIGINS` es obligatoria en producción.
 
 ### Riesgos conocidos (aceptados por ahora)
@@ -376,10 +410,11 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [x] Seed con datos de ejemplo
 - [x] Autenticación: registro, login, logout, sesión actual, roles, rate limit y protección CSRF
 - [x] API REST: catálogo (obras, creadores, géneros), reseñas con nota opcional, perfiles de usuario y Swagger
+- [x] Frontend: página principal (sin datos) con registro, inicio y cierre de sesión
 - [x] Endurecimiento: `NODE_ENV` obligatoria, seed solo en local, argon2 con límite de memoria, bloqueo por cuenta y `CORS_ORIGINS` obligatoria en producción
 
 **Pendiente**
-- [ ] Frontend (React + Vite)
+- [ ] Frontend: páginas de catálogo, detalle, reseñas y perfil
 - [ ] Recuperar contraseña y verificar email (requiere servicio de correo)
 - [ ] Login con Google o GitHub
 - [ ] Integración con APIs externas

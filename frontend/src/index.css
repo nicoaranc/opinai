@@ -1,0 +1,281 @@
+/* Estilos base. Colores como variables, con tema claro y oscuro. */
+
+:root {
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --text: #1c1a17;
+  --text-muted: #6b665e;
+  --border: #e4e0d9;
+  --accent: #d9480f;
+  --accent-hover: #c03e0c;
+  --accent-text: #ffffff;
+  --danger-bg: #fdecea;
+  --danger-text: #a61b1b;
+  --focus: #1971c2;
+  --backdrop: rgb(20 18 15 / 0.45);
+  --radius: 10px;
+
+  color-scheme: light;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161412;
+    --surface: #211e1b;
+    --text: #f1ede7;
+    --text-muted: #a69f95;
+    --border: #3a3530;
+    --accent: #ff7a3d;
+    --accent-hover: #ff9363;
+    --accent-text: #1a0d05;
+    --danger-bg: #3d1a17;
+    --danger-text: #ffb4a9;
+    --focus: #74c0fc;
+    --backdrop: rgb(0 0 0 / 0.6);
+
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+h1,
+h2 {
+  margin: 0;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── Cabecera ─────────────────────────────── */
+
+.header {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1100px;
+  min-height: 64px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  border: 4px solid var(--accent);
+  border-radius: 50%;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.user-name {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── Botones y formularios ────────────────── */
+
+.button {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.button-primary {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.button-primary:hover:not(:disabled) {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+.icon-button {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.field-hint {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.optional {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  color: var(--accent-hover);
+}
+
+.dialog-switch {
+  margin: 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.form-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  white-space: pre-line;
+}
+
+/* ── Ventana de login ─────────────────────── */
+
+.dialog {
+  width: min(400px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.dialog::backdrop {
+  background: var(--backdrop);
+}
+
+.dialog-card {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dialog-header h2 {
+  font-size: 1.35rem;
+}
+
+/* ── Página principal ─────────────────────── */
+
+.home {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 72px 16px;
+}
+
+.home h1 {
+  max-width: 18ch;
+  font-size: clamp(2rem, 6vw, 3.5rem);
+}
+
+.lead {
+  max-width: 50ch;
+  margin: 16px 0 0;
+  font-size: 1.15rem;
+  color: var(--text-muted);
+}
