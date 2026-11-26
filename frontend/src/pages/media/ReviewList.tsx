@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import type { MediaReview, Page } from '../../api/types'
 import { useApi } from '../../api/use-api'
 import { Pagination } from '../../components/Pagination'
@@ -99,7 +100,9 @@ function ReviewItem({ review }: { review: MediaReview }) {
   return (
     <li className="review">
       <div className="review-meta">
-        <span className="review-author">{author}</span>
+        <Link to={`/usuario/${review.user.username}`} className="review-author">
+          {author}
+        </Link>
         <span className="muted">@{review.user.username}</span>
         <span className="muted">· {shortDate(review.createdAt)}</span>
       </div>

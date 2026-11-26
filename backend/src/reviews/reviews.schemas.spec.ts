@@ -62,6 +62,13 @@ describe('reviewContentIssues (edición)', () => {
 });
 
 describe('listReviewsQuerySchema', () => {
+  it('distingue "solo con texto", "solo valoraciones" y "todas"', () => {
+    expect(listReviewsQuerySchema.parse({ withText: 'false' }).withText).toBe(
+      false,
+    );
+    expect(listReviewsQuerySchema.parse({}).withText).toBeUndefined();
+  });
+
   it('aplica valores por defecto y lee withText', () => {
     expect(listReviewsQuerySchema.parse({ withText: 'true' })).toEqual({
       page: 1,

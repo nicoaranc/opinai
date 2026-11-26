@@ -126,3 +126,21 @@ export interface ReviewInput {
   body: string | null
   containsSpoilers: boolean
 }
+
+// Perfil público (GET /api/users/:username): sin email
+export interface UserProfile extends UserSummary {
+  bio: string | null
+  role: 'USER' | 'ADMIN'
+  createdAt: string
+  stats: {
+    reviewCount: number // todas
+    writtenCount: number // con texto
+    ratingCount: number // con nota
+    ratingAvg: number | null // 1–10
+  }
+}
+
+// Reseña de un usuario, con la obra (GET /api/users/:username/reviews)
+export interface UserReview extends ReviewFields {
+  media: MediaSummary
+}

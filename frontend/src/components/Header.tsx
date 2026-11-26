@@ -32,9 +32,13 @@ export function Header() {
         <div className="header-actions" aria-live="polite">
           {state.status === 'authenticated' && (
             <>
-              <span className="user-name">
+              <Link
+                to={`/usuario/${state.user.username}`}
+                className="user-name"
+                title="Ver tus reseñas y valoraciones"
+              >
                 {state.user.displayName ?? state.user.username}
-              </span>
+              </Link>
               <button
                 type="button"
                 className="button"

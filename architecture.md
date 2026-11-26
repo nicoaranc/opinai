@@ -1,7 +1,7 @@
 # Arquitectura de opinai
 
 > Documento vivo: se actualiza cada vez que se agrega o cambia una parte del sistema.
-> Última actualización: 2026-11-26 (integración con IGDB: búsqueda e importación de videojuegos)
+> Última actualización: 2026-11-26 (perfil de usuario con su historial de reseñas)
 
 opinai es una plataforma de reseñas y valoraciones de **películas, series, música (álbumes y canciones) y videojuegos**.
 
@@ -77,7 +77,7 @@ opinai/
 │       ├── lib/               ← categorías y formato (fechas, notas, etiquetas en español)
 │       ├── lib/               ← (también images.ts: tamaños de las portadas de TMDB)
 │       ├── components/        ← Header, Footer, AuthDialog, MediaCard, Cover, Stars, StarRatingInput...
-│       └── pages/             ← HomePage, CategoryPage, ImportPage, NotFoundPage, media/ (detalle y reseñas)
+│       └── pages/             ← HomePage, CategoryPage, ImportPage, UserPage, NotFoundPage, media/ (detalle y reseñas)
 └── backend/
     ├── prisma.config.ts       ← config de la CLI de Prisma (schema, migraciones, seed, URL)
     ├── prisma/
@@ -279,6 +279,7 @@ SPA de React con Vite y React Router. Permite explorar el catálogo por categor�
 | `/peliculas`, `/series`, `/musica`, `/videojuegos` | `CategoryPage` | Rejilla de obras del tipo, con orden (`?orden=recent\|rating\|popular\|title`) y paginación (`?pagina=`, 24 por página). Música tiene dos pestañas, Álbumes y Canciones (`?ver=albumes\|canciones`). Las categorías se definen en `src/lib/categories.ts`. |
 | `/peliculas/agregar`, `/series/agregar`, `/musica/agregar`, `/videojuegos/agregar` | `ImportPage` | Buscador de la fuente de la categoría (con sesión): TMDB para películas y series, IGDB para videojuegos, Deezer para música, con pestañas Álbumes y Canciones (`?tipo=albumes\|canciones`). Cada resultado tiene "Agregar", que importa la obra y lleva a su página, o "Ver" si ya está en el catálogo. La categoría enlaza aquí con "+ Agregar desde TMDB/Deezer/IGDB". Las fuentes se configuran en `importer` de cada categoría (`src/lib/categories.ts`) y `src/api/importers.ts` unifica sus respuestas. |
 | `/obra/:slug` | `MediaDetailPage` | Portada, nota promedio, sinopsis, créditos, géneros y datos del tipo (duración, temporadas, plataformas...). Canciones del álbum o álbumes de la canción, con enlaces. Tu reseña y la lista de reseñas. |
+| `/usuario/:username` | `UserPage` | Perfil público: nombre, @usuario, fecha de alta, bio y estadísticas (reseñas, con texto, notas, nota media). Debajo, **todas sus reseñas y valoraciones** con la obra (portada, tipo, creador, año), nota, fecha y texto (los spoilers se ocultan). Filtros en la URL: tipo de obra (`?tipo=MOVIE…`), contenido (`?texto=resenas` solo con texto, `?texto=valoraciones` solo nota) y orden (`?orden=recent\|oldest\|rating_desc\|rating_asc`), con paginación de 20. En el perfil propio cada reseña tiene "Editar", que lleva a la obra. Se llega desde el nombre en la cabecera o desde el autor de cualquier reseña. |
 | cualquier otra | `NotFoundPage` | "No encontrado". |
 
 La cabecera tiene enlaces a las 4 categorías en todas las páginas.
@@ -313,7 +314,7 @@ La cabecera tiene enlaces a las 4 categorías en todas las páginas.
 
 ### Interfaz
 
-- `Header`: marca, enlaces a las categorías, y "Iniciar sesión" y "Crear cuenta", o el nombre del usuario con "Cerrar sesión".
+- `Header`: marca, enlaces a las categorías, y "Iniciar sesión" y "Crear cuenta", o el nombre del usuario (enlace a su perfil) con "Cerrar sesión".
 - `AuthDialogProvider` monta la ventana de login una sola vez; cualquier componente la abre con `useOpenAuthDialog()('login' | 'register')`.
 - `AuthDialog`: `<dialog>` nativo con dos modos, login y registro, que se alternan desde la misma ventana (el email se conserva). Gestiona el foco y se cierra con Escape o clic fuera. El registro pide email, nombre de usuario, contraseña y nombre visible opcional; el navegador valida las mismas reglas que el back (usuario de 3 a 30 caracteres `A-Z a-z 0-9 _`, contraseña de 8 a 128). Muestra el mensaje de error del back (`400` por campo, `401`, `409` email o usuario en uso, `429`).
 - Estilos en `index.css` con variables de color para tema claro y oscuro (`prefers-color-scheme`).
@@ -389,7 +390,7 @@ Base: `/api`. 🔓 = pública, 🔒 = requiere sesión.
 
 | Método | Ruta | Acceso | Descripción |
 |---|---|---|---|
-| `GET` | `/api/media/:idOrSlug/reviews` | 🔓 | Reseñas de una obra, con su autor. `sort`: `recent` (por defecto), `oldest`, `rating_desc`, `rating_asc` (las sin nota van al final). `withText=true`: solo las que tienen texto. |
+| `GET` | `/api/media/:idOrSlug/reviews` | 🔓 | Reseñas de una obra, con su autor. `sort`: `recent` (por defecto), `oldest`, `rating_desc`, `rating_asc` (las sin nota van al final). `withText=true`: solo las que tienen texto; `withText=false`: solo valoraciones (nota sin texto); sin indicar, todas. |
 | `POST` | `/api/media/:id/reviews` | 🔒 | Crea la reseña propia: `{ rating?, title?, body?, containsSpoilers? }`, con nota, texto o ambos. `409` si ya existe (el mensaje indica su ID). |
 | `GET` | `/api/reviews/:id` | 🔓 | Una reseña con su autor y su obra. |
 | `PATCH` | `/api/reviews/:id` | 🔒 autor | Edita. `null` quita la nota o el texto, siempre que quede uno de los dos. `403` si no es tuya. |
@@ -523,10 +524,11 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [x] Integración con TMDB: búsqueda e importación de películas y series, desde la API y desde el front
 - [x] Integración con Deezer: búsqueda e importación de álbumes (con sus canciones) y canciones (con su álbum), desde la API y desde el front
 - [x] Integración con IGDB: búsqueda e importación de videojuegos, desde la API y desde el front
+- [x] Perfil de usuario con todas sus reseñas y valoraciones, filtrables por tipo, contenido y orden
 - [x] Endurecimiento: `NODE_ENV` obligatoria, seed solo en local, argon2 con límite de memoria, bloqueo por cuenta y `CORS_ORIGINS` obligatoria en producción
 
 **Pendiente**
-- [ ] Frontend: búsqueda, perfiles de usuario, páginas de creadores y sección de administración
+- [ ] Frontend: búsqueda, edición del perfil, páginas de creadores y sección de administración
 - [ ] Script para dar rol ADMIN a un usuario (necesario antes de desplegar)
 - [ ] Recuperar contraseña y verificar email (requiere servicio de correo)
 - [ ] Login con Google o GitHub

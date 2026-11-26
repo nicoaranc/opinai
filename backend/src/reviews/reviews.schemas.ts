@@ -58,7 +58,8 @@ export const REVIEW_SORTS = [
 
 export const listReviewsQuerySchema = paginationSchema.extend({
   sort: z.enum(REVIEW_SORTS).default('recent'),
-  // Solo reseñas con texto (excluye las que son solo una nota)
+  // true: solo reseñas con texto · false: solo valoraciones (nota sin
+  // texto) · sin indicar: todas
   withText: z.stringbool().optional(),
 });
 export type ListReviewsQuery = z.infer<typeof listReviewsQuerySchema>;

@@ -56,8 +56,10 @@ const ORDER_BY: Record<
   ],
 };
 
+// true: solo con texto · false: solo valoraciones (nota sin texto) · sin
+// indicar: todas
 const textFilter = (withText?: boolean): Prisma.ReviewWhereInput =>
-  withText ? { body: { not: null } } : {};
+  withText === undefined ? {} : { body: withText ? { not: null } : null };
 
 @Injectable()
 export class ReviewsService {

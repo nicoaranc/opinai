@@ -136,6 +136,8 @@ h2 {
 .user-name {
   overflow: hidden;
   font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -623,6 +625,155 @@ a.button {
 
 .cover-game {
   background: var(--cover-game);
+}
+
+/* ── Perfil de usuario ────────────────────── */
+
+a.user-name:hover,
+a.review-author:hover {
+  text-decoration: underline;
+}
+
+a.review-author {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.profile-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.avatar {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  overflow: hidden;
+  border-radius: 50%;
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profile-main h1 {
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  overflow-wrap: anywhere;
+}
+
+.profile-main p {
+  margin: 0;
+}
+
+.profile-bio {
+  max-width: 60ch;
+  margin-top: 8px !important;
+}
+
+.profile-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin: 0 0 36px;
+}
+
+.profile-stat {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.profile-stat dt {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.profile-stat dd {
+  margin: 2px 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabs {
+  flex-wrap: wrap;
+}
+
+.history {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity 0.15s;
+}
+
+.history.is-refreshing {
+  opacity: 0.55;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.history-top {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-top p {
+  margin: 2px 0 0;
+}
+
+.history-title {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.history-title:hover {
+  text-decoration: underline;
+}
+
+.history-rating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.button-small {
+  padding: 4px 12px;
+  font-size: 0.875rem;
 }
 
 /* ── Agregar desde TMDB ───────────────────── */

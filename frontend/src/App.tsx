@@ -8,6 +8,7 @@ import { HomePage } from './pages/HomePage'
 import { ImportPage } from './pages/ImportPage'
 import { MediaDetailPage } from './pages/media/MediaDetailPage'
 import { NotFoundPage } from './pages/NotFoundPage'
+import { UserPage } from './pages/UserPage'
 
 function Layout() {
   return (
@@ -28,6 +29,7 @@ const router = createBrowserRouter([
     children: [
       { path: '/', element: <HomePage /> },
       { path: '/obra/:slug', element: <MediaDetailPage /> },
+      { path: '/usuario/:username', element: <UserPage /> },
       // /peliculas, /series, /musica, /videojuegos
       { path: '/:category', element: <CategoryPage /> },
       // /peliculas/agregar, /series/agregar (búsqueda en TMDB)
