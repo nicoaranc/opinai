@@ -134,6 +134,14 @@ async function main() {
     CreatorKind.GROUP,
     'GB',
   );
+  // ID real en Deezer: al importar sus discos se reutiliza este creador
+  await prisma.creatorExternalId.create({
+    data: {
+      creatorId: radiohead.id,
+      provider: 'deezer',
+      externalId: 'artist:399',
+    },
+  });
   const teamCherry = await creator(
     'team-cherry',
     'Team Cherry',
@@ -222,6 +230,10 @@ async function main() {
     data: {
       type: MediaType.ALBUM,
       slug: 'radiohead-ok-computer',
+      // ID real en Deezer: importar este álbum devuelve el del seed
+      externalIds: {
+        create: { provider: 'deezer', externalId: 'album:14879699' },
+      },
       title: 'OK Computer',
       releaseDate: date('1997-05-21'),
       language: 'en',
@@ -234,16 +246,32 @@ async function main() {
     },
   });
 
-  const trackList: [slug: string, title: string, seconds: number][] = [
-    ['airbag', 'Airbag', 284],
-    ['paranoid-android', 'Paranoid Android', 383],
-    ['subterranean-homesick-alien', 'Subterranean Homesick Alien', 267],
-    ['exit-music-for-a-film', 'Exit Music (For a Film)', 264],
-    ['let-down', 'Let Down', 299],
-    ['karma-police', 'Karma Police', 261],
+  // [slug, título, segundos, ID de Deezer, ISRC]
+  const trackList: [string, string, number, number, string][] = [
+    ['airbag', 'Airbag', 284, 138539971, 'GBAYE9701274'],
+    ['paranoid-android', 'Paranoid Android', 383, 138539973, 'GBAYE9701376'],
+    [
+      'subterranean-homesick-alien',
+      'Subterranean Homesick Alien',
+      267,
+      138539975,
+      'GBAYE9701377',
+    ],
+    [
+      'exit-music-for-a-film',
+      'Exit Music (For a Film)',
+      264,
+      138539977,
+      'GBAYE9701372',
+    ],
+    ['let-down', 'Let Down', 299, 138539979, 'GBAYE9701374'],
+    ['karma-police', 'Karma Police', 261, 138539981, 'GBAYE9701368'],
   ];
   const trackIds: string[] = [];
-  for (const [index, [slug, title, seconds]] of trackList.entries()) {
+  for (const [
+    index,
+    [slug, title, seconds, deezerId, isrc],
+  ] of trackList.entries()) {
     const track = await prisma.media.create({
       data: {
         type: MediaType.TRACK,
@@ -260,6 +288,12 @@ async function main() {
         },
         appearsOnAlbums: {
           create: { albumId: okComputer.id, trackNumber: index + 1 },
+        },
+        externalIds: {
+          create: [
+            { provider: 'deezer', externalId: `track:${deezerId}` },
+            { provider: 'isrc', externalId: isrc },
+          ],
         },
       },
     });

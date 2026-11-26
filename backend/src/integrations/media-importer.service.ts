@@ -91,7 +91,7 @@ export class MediaImporter {
     }
   }
 
-  private async findMediaId(ref: ExternalRef): Promise<string | null> {
+  async findMediaId(ref: ExternalRef): Promise<string | null> {
     const row = await this.prisma.externalId.findUnique({
       where: { provider_externalId: ref },
       select: { mediaId: true },

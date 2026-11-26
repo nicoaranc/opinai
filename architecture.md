@@ -1,7 +1,7 @@
 # Arquitectura de opinai
 
 > Documento vivo: se actualiza cada vez que se agrega o cambia una parte del sistema.
-> Última actualización: 2026-11-26 (integración con TMDB: búsqueda e importación de películas y series)
+> Última actualización: 2026-11-26 (integración con Deezer: búsqueda e importación de álbumes y canciones)
 
 opinai es una plataforma de reseñas y valoraciones de **películas, series, música (álbumes y canciones) y videojuegos**.
 
@@ -28,8 +28,9 @@ flowchart LR
     F -->|"/api/* (rewrite, mismo origen)<br/>cookie de sesión"| B["Backend<br/>NestJS<br/>(Render Web Service)"]
     B -->|Prisma + pg| D[("PostgreSQL<br/>(Supabase)")]
     B -->|HTTPS + token| T["TMDB<br/>(películas y series)"]
-    B -.->|futuro| X["Deezer (música)<br/>IGDB (videojuegos)"]
-    F -.->|imágenes directas| CDN["CDN de imágenes<br/>image.tmdb.org"]
+    B -->|HTTPS, sin clave| DZ["Deezer<br/>(música)"]
+    B -.->|futuro| X["IGDB<br/>(videojuegos)"]
+    F -.->|imágenes directas| CDN["CDN de imágenes<br/>image.tmdb.org<br/>cdn-images.dzcdn.net"]
 ```
 
 - El **frontend** es una SPA estática. No accede a la base de datos ni a APIs externas con credenciales.
@@ -71,7 +72,7 @@ opinai/
 │   └── src/
 │       ├── main.tsx / App.tsx ← entrada: providers y rutas
 │       ├── index.css          ← estilos globales y variables de color (claro/oscuro)
-│       ├── api/               ← client (fetch a /api), useApi, reviews, types
+│       ├── api/               ← client (fetch a /api), useApi, reviews, importers (TMDB y Deezer), types
 │       ├── auth/              ← sesión (useAuth, AuthProvider) y apertura del login (useOpenAuthDialog)
 │       ├── lib/               ← categorías y formato (fechas, notas, etiquetas en español)
 │       ├── lib/               ← (también images.ts: tamaños de las portadas de TMDB)
@@ -95,7 +96,7 @@ opinai/
     │   ├── genres/            ← géneros
     │   ├── reviews/           ← reseñas y valoraciones
     │   ├── users/             ← perfiles públicos y edición del propio
-    │   ├── integrations/      ← APIs externas: MediaImporter (común) y tmdb/
+    │   ├── integrations/      ← APIs externas: MediaImporter (común), tmdb/ y deezer/
     │   ├── health/            ← GET /api/health
     │   └── generated/prisma/  ← cliente Prisma generado (no se versiona)
     └── test/                  ← tests e2e
@@ -142,7 +143,7 @@ NestJS en modo **ESM**: los imports relativos terminan en `.js`. Todas las rutas
 | `GenresModule` | Géneros con cuántas obras tiene cada uno. Alta, edición y baja (ADMIN). |
 | `ReviewsModule` | Reseñas: listar las de una obra, crear la propia, editarla y borrarla. Mantiene las estadísticas de cada obra. Exporta `ReviewsService`. |
 | `UsersModule` | Perfil público de un usuario con estadísticas, sus reseñas y edición del perfil propio. |
-| `IntegrationsModule` | APIs externas. Por ahora TMDB: búsqueda e importación de películas y series. Detalles en [Integraciones](#integraciones-con-apis-externas). |
+| `IntegrationsModule` | APIs externas: TMDB (películas y series) y Deezer (álbumes y canciones). Búsqueda e importación. Detalles en [Integraciones](#integraciones-con-apis-externas). |
 | `HealthModule` | `GET /api/health` con Terminus: hace ping a la base de datos (`SELECT 1`, timeout de 3 s). Público y sin rate limit. |
 | `ObserveModule` | Telemetría de NestJS Observe, incluida en la plantilla. Inactiva hasta que se vincule con `npx @nestjs/observe link`. |
 
@@ -228,12 +229,21 @@ handler(@CurrentUser() user: PublicUser) {}
 - Imágenes: se guarda la URL de TMDB con el póster en `w500`, el fondo en `w1280` y las fotos de personas en `w185`. El front cambia el tamaño en la URL según dónde la muestre (ver [Frontend](#5b-frontend)).
 - Errores: `404` si el ID no existe en TMDB; `503` si TMDB no responde (8 s de espera), limita las peticiones o rechaza el token (esto último se registra en el log).
 
+**Deezer** (`src/integrations/deezer/`):
+- API pública: **no necesita clave ni registro**. Límite de ~50 peticiones cada 5 s por IP. Deezer responde `200` incluso con errores, con `{ "error": { code } }` en el cuerpo: el cliente lo traduce (`800` → `404`, `4` → `503` por límite).
+- IDs externos: `deezer` / `album:<id>`, `track:<id>`, `artist:<id>`. Además, `upc` para álbumes e **`isrc` para canciones**: el ISRC identifica la grabación, así que la misma canción en dos álbumes (el original y un recopilatorio) es **una sola obra** con sus reseñas. Las versiones remasterizadas tienen otro ISRC y quedan como obras distintas.
+- **Importar un álbum** crea el álbum, cada una de sus canciones (o reutiliza las que ya existan por ID de Deezer o ISRC) y su lista de canciones con disco y número de pista. Si una canción falla, se importan las demás y se registra en el log.
+- **Importar una canción importa su álbum completo**, para que tenga "Aparece en" y el álbum quede con su lista. Si el álbum ya existía sin esa canción (p. ej. el del seed, que tiene solo 6), la canción se importa sola y se agrega al álbum en su posición.
+- Datos que se toman: título, fecha, portada (500×500), géneros, tipo (álbum, EP, sencillo o recopilatorio), sello, artista principal y colaboradores (`PRIMARY_ARTIST`, `FEATURED_ARTIST`); en canciones, duración, si es explícita y su artista principal. Las canciones heredan la fecha, la portada y los géneros del álbum.
+- **No se guarda la preview de 30 s**: Deezer firma esas URLs y caducan.
+- Deezer no distingue personas de grupos: los artistas se crean como `PERSON` (un ADMIN puede corregirlo).
+
 ### Prisma 7
 
 - `schema.prisma` no lleva URL. La CLI la toma de `prisma.config.ts` (`DIRECT_URL`) y la app la pasa al adapter en `PrismaService` (`DATABASE_URL`).
 - El cliente se genera en `src/generated/prisma` con el generator `prisma-client` (ESM). Se importa desde `../generated/prisma/client.js`.
 - `migrate dev` no regenera el cliente. Después de migrar hay que ejecutar `npm run db:generate`.
-- **Seed** (`prisma/seed.ts`, se ejecuta con tsx): **borra todos los datos** y crea 3 usuarios (`admin@opinai.local` con rol ADMIN, `ana@opinai.local` y `bruno@opinai.local`, todos con la contraseña **`opinai123`**), 7 géneros, 5 creadores, 11 obras (2 películas, 1 serie, 1 álbum con 6 canciones, 1 juego) y 9 reseñas (una sin nota), y calcula las estadísticas de cada obra. *Parásitos*, *La llegada*, *Breaking Bad* y sus directores o creadores llevan su **ID real de TMDB**, así que importarlos devuelve la obra del seed en vez de duplicarla. Se puede repetir sin problemas. **Solo corre contra una base local** (`localhost`, `127.0.0.1` o `::1`) y nunca con `NODE_ENV=production` (`prisma/seed-guard.ts`). Así, aunque el `.env` local apunte a Supabase, no puede borrar producción ni crear un ADMIN con contraseña conocida.
+- **Seed** (`prisma/seed.ts`, se ejecuta con tsx): **borra todos los datos** y crea 3 usuarios (`admin@opinai.local` con rol ADMIN, `ana@opinai.local` y `bruno@opinai.local`, todos con la contraseña **`opinai123`**), 7 géneros, 5 creadores, 11 obras (2 películas, 1 serie, 1 álbum con 6 canciones, 1 juego) y 9 reseñas (una sin nota), y calcula las estadísticas de cada obra. *Parásitos*, *La llegada*, *Breaking Bad* y sus directores o creadores llevan su **ID real de TMDB**; Radiohead, *OK Computer* y sus 6 canciones, su **ID de Deezer** (y el ISRC de cada canción). Así, importarlos devuelve la obra del seed en vez de duplicarla. Se puede repetir sin problemas. **Solo corre contra una base local** (`localhost`, `127.0.0.1` o `::1`) y nunca con `NODE_ENV=production` (`prisma/seed-guard.ts`). Así, aunque el `.env` local apunte a Supabase, no puede borrar producción ni crear un ADMIN con contraseña conocida.
 
 ### Scripts
 
@@ -259,7 +269,7 @@ SPA de React con Vite y React Router. Permite explorar el catálogo por categor�
 |---|---|---|
 | `/` | `HomePage` | Titular y las 4 categorías: Películas, Series, Música y Videojuegos. |
 | `/peliculas`, `/series`, `/musica`, `/videojuegos` | `CategoryPage` | Rejilla de obras del tipo, con orden (`?orden=recent\|rating\|popular\|title`) y paginación (`?pagina=`, 24 por página). Música tiene dos pestañas, Álbumes y Canciones (`?ver=albumes\|canciones`). Las categorías se definen en `src/lib/categories.ts`. |
-| `/peliculas/agregar`, `/series/agregar` | `ImportPage` | Buscador de TMDB (con sesión). Cada resultado tiene "Agregar", que importa la obra y lleva a su página, o "Ver" si ya está en el catálogo. La página de la categoría enlaza aquí con "+ Agregar desde TMDB". |
+| `/peliculas/agregar`, `/series/agregar`, `/musica/agregar` | `ImportPage` | Buscador de la fuente de la categoría (con sesión): TMDB para películas y series, Deezer para música, con pestañas Álbumes y Canciones (`?tipo=albumes\|canciones`). Cada resultado tiene "Agregar", que importa la obra y lleva a su página, o "Ver" si ya está en el catálogo. La categoría enlaza aquí con "+ Agregar desde TMDB/Deezer". Las fuentes se configuran en `importer` de cada categoría (`src/lib/categories.ts`) y `src/api/importers.ts` unifica sus respuestas. |
 | `/obra/:slug` | `MediaDetailPage` | Portada, nota promedio, sinopsis, créditos, géneros y datos del tipo (duración, temporadas, plataformas...). Canciones del álbum o álbumes de la canción, con enlaces. Tu reseña y la lista de reseñas. |
 | cualquier otra | `NotFoundPage` | "No encontrado". |
 
@@ -273,9 +283,9 @@ La cabecera tiene enlaces a las 4 categorías en todas las páginas.
 - **La lista** (`ReviewList`) se ordena por fecha o nota, filtra "solo con texto" y pagina de 10 en 10. Las reseñas con spoilers ocultan el texto hasta pulsar "Mostrar".
 - Las notas se muestran como estrellas (redondeo a media estrella) y como número de 0 a 5 con un decimal ("4,8").
 - Las obras sin portada muestran la inicial del título sobre un color según el tipo (`Cover`). Lo mismo si la imagen no carga (por ejemplo, si el proveedor la borró).
-- **Tamaño de las portadas**: `imageSrc()` (`src/lib/images.ts`) cambia el tamaño en las URLs de TMDB: `w185` en resultados de búsqueda, `w342` en la rejilla y `w500` en el detalle. Las URLs de otros orígenes se usan tal cual.
+- **Tamaño de las portadas**: `imageSrc()` (`src/lib/images.ts`) cambia el tamaño en las URLs de TMDB (`w185` en resultados de búsqueda, `w342` en la rejilla, `w500` en el detalle) y de Deezer (`250x250` en resultados, `500x500` en rejilla y detalle). Las URLs de otros orígenes se usan tal cual.
 - El detalle enlaza al tráiler si la obra lo tiene.
-- **Pie de página** con la atribución que exige TMDB ("Este producto usa la API de TMDB, pero no está avalado ni certificado por TMDB").
+- **Pie de página** con la atribución que exige TMDB ("Este producto usa la API de TMDB, pero no está avalado ni certificado por TMDB") y la de Deezer.
 
 ### Datos
 
@@ -334,8 +344,8 @@ erDiagram
 | `Credit` | `credits` | Une `Media` con `Creator` y un rol: `DIRECTOR`, `SHOWRUNNER`, `WRITER`, `PRIMARY_ARTIST`, `FEATURED_ARTIST`, `PRODUCER`, `DEVELOPER`, `PUBLISHER`. |
 | `Genre` | `genres` | Géneros (relación muchos a muchos con `Media`). |
 | `Review` | `reviews` | Una por usuario y obra. Tiene **nota, texto o ambos**: `rating` (1–10, equivale a 0,5–5 estrellas) y `body` son opcionales, pero no pueden faltar los dos. Un `title` exige `body`. Las reseñas sin nota no cuentan en el promedio. La base lo garantiza con dos `CHECK` (`reviews_rating_range`, `reviews_rating_or_body`). |
-| `ExternalId` | `external_ids` | IDs de la obra en servicios externos: `tmdb` (`movie:496243`, `tv:1396`), `imdb` (`tt6751668`). Único por proveedor e ID, y una obra tiene como mucho uno por proveedor. |
-| `CreatorExternalId` | `creator_external_ids` | Lo mismo para creadores (`tmdb` / `person:21684`), para no duplicarlos entre importaciones. |
+| `ExternalId` | `external_ids` | IDs de la obra en servicios externos: `tmdb` (`movie:496243`, `tv:1396`), `imdb` (`tt6751668`), `deezer` (`album:14879699`, `track:138539981`), `upc` y `isrc`. Único por proveedor e ID, y una obra tiene como mucho uno por proveedor. |
+| `CreatorExternalId` | `creator_external_ids` | Lo mismo para creadores (`tmdb` / `person:21684`, `deezer` / `artist:399`), para no duplicarlos entre importaciones. |
 
 ## 7. API
 
@@ -392,7 +402,10 @@ Base: `/api`. 🔓 = pública, 🔒 = requiere sesión.
 | `GET` | `/api/tmdb/search` | 🔒 | Busca en TMDB. Query: `type` (`MOVIE` o `SERIES`), `q`, `page` (TMDB devuelve 20 por página). Cada resultado: `{ tmdbId, type, title, originalTitle, year, overview, posterUrl, importedSlug }`; `importedSlug` indica si ya está en el catálogo. Límite: 60 por minuto. |
 | `POST` | `/api/tmdb/imports` | 🔒 | Importa `{ type, tmdbId }`. `201` `{ created: true, media }` si se agregó ahora, `200` `{ created: false, media }` si ya estaba. `media` tiene la forma del detalle. Límite: 30 cada 10 minutos. `404` si no existe en TMDB, `503` si TMDB no está disponible o falta el token. |
 
-Requieren sesión para no gastar la cuota de TMDB con visitas anónimas, pero **cualquier usuario** puede importar, no solo los ADMIN.
+| `GET` | `/api/deezer/search` | 🔒 | Busca en Deezer. Query: `type` (`ALBUM` o `TRACK`), `q`, `page` (20 por página, hasta 50 páginas). Cada resultado: `{ deezerId, type, title, artist, albumTitle, detail, coverUrl, explicit, importedSlug }` (`detail`: "Álbum · 12 canciones" o la duración). Límite: 60 por minuto. |
+| `POST` | `/api/deezer/imports` | 🔒 | Importa `{ type, deezerId }`. Un álbum se importa con sus canciones; una canción, con su álbum. `201` si se agregó ahora, `200` si ya estaba. Límite: 30 cada 10 minutos. `404` si no existe en Deezer. |
+
+Requieren sesión para no gastar la cuota de los proveedores con visitas anónimas, pero **cualquier usuario** puede importar, no solo los ADMIN. Las respuestas de búsqueda de ambos tienen la misma paginación: `{ items, page, totalPages, total }`.
 
 ### Formas de las respuestas
 
@@ -458,7 +471,8 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - **Seguro por defecto**: toda ruta nueva exige sesión salvo que se marque `@Public()`.
 - **El front tiene pocas dependencias**: React Router para las rutas y nada más. Los datos se piden con un hook propio (`useApi`) en vez de React Query, y los estilos son CSS plano con variables. Si aparecen necesidades como caché entre páginas, se puede pasar a React Query.
 - **Las imágenes de los proveedores no se descargan ni se guardan**: se guarda su URL y el navegador las pide directo a su CDN, igual en local y en producción. Solo se usaría almacenamiento propio (Supabase Storage) para imágenes que suban los usuarios.
-- **Una API principal por tipo de medio**: TMDB para películas y series, Deezer para música e IGDB para videojuegos (estas dos, pendientes). Todas pasan por el mismo `MediaImporter`.
+- **Una API principal por tipo de medio**: TMDB para películas y series, Deezer para música e IGDB para videojuegos (pendiente). Todas pasan por el mismo `MediaImporter`. Para música se eligió Deezer frente a MusicBrainz (más rigurosa pero compleja y con 1 petición/s), Apple iTunes Search (alternativa si Deezer falla) y Spotify (restringe apps nuevas y guardar sus datos).
+- **Las canciones se identifican por ISRC** además de por su ID en Deezer, para que una misma grabación en varios álbumes sea una sola obra.
 - **Cualquier usuario con sesión puede importar**, para que el catálogo crezca con lo que la gente quiere reseñar. Los datos vienen de TMDB, así que el riesgo de abuso es bajo; hay rate limit.
 - **Las rutas del front están en español** (`/peliculas`, `/obra/:slug`), las de la API en inglés (`/api/media`).
 - **Fallar al arrancar antes que arrancar inseguro.** `NODE_ENV` es obligatoria porque de ella dependen la cookie segura y otras protecciones, y `CORS_ORIGINS` es obligatoria en producción.
@@ -477,6 +491,9 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - **Géneros duplicados por nombre**: TMDB llama "Suspense" a lo que el seed llama "Thriller", y quedan como dos géneros distintos.
 - **Atribución en texto**: el pie de página cita a TMDB con texto y enlace, pero sus guías piden además su logo.
 - **Términos de uso de TMDB**: guardamos sus datos en nuestra base; hay que confirmar en sus términos que está permitido y por cuánto tiempo.
+- **Deezer no tiene un acuerdo formal de uso** para su API pública: podría cambiar o cerrarse sin aviso. El reemplazo previsto es Apple iTunes Search o MusicBrainz, con otro *mapper*.
+- **Los artistas de Deezer se crean como `PERSON`**, aunque sean grupos.
+- **Las canciones solo guardan su artista principal**; los colaboradores de cada canción requerirían una petición por canción.
 
 ## 10. Estado y próximos pasos
 
@@ -490,6 +507,7 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [x] API REST: catálogo (obras, creadores, géneros), reseñas con nota opcional, perfiles de usuario y Swagger
 - [x] Frontend: categorías, listados con orden y paginación, detalle de obras y reseñas (crear, editar, borrar), registro e inicio de sesión
 - [x] Integración con TMDB: búsqueda e importación de películas y series, desde la API y desde el front
+- [x] Integración con Deezer: búsqueda e importación de álbumes (con sus canciones) y canciones (con su álbum), desde la API y desde el front
 - [x] Endurecimiento: `NODE_ENV` obligatoria, seed solo en local, argon2 con límite de memoria, bloqueo por cuenta y `CORS_ORIGINS` obligatoria en producción
 
 **Pendiente**
@@ -497,5 +515,5 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [ ] Script para dar rol ADMIN a un usuario (necesario antes de desplegar)
 - [ ] Recuperar contraseña y verificar email (requiere servicio de correo)
 - [ ] Login con Google o GitHub
-- [ ] Integraciones con Deezer (música) e IGDB (videojuegos)
+- [ ] Integración con IGDB (videojuegos)
 - [ ] Despliegue en Render y Supabase

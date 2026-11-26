@@ -59,9 +59,13 @@ function CategoryListing({ category }: { category: Category }) {
       <div className="page-header">
         <h1>{category.label}</h1>
         <div className="page-header-actions">
-          {category.tmdbType && (
-            <Link to={`/${category.slug}/agregar`} className="button">
-              + Agregar desde TMDB
+          {category.importer && (
+            <Link
+              // En Música se abre en la pestaña que se está viendo
+              to={`/${category.slug}/agregar${category.views.length > 1 ? `?tipo=${view.id}` : ''}`}
+              className="button"
+            >
+              + Agregar desde {category.importer.name}
             </Link>
           )}
           <label className="select-field">
@@ -101,11 +105,11 @@ function CategoryListing({ category }: { category: Category }) {
       {data && data.items.length === 0 && (
         <p className="status">
           Todavía no hay nada en esta sección.
-          {category.tmdbType && (
+          {category.importer && (
             <>
               {' '}
               <Link to={`/${category.slug}/agregar`}>
-                Agrega lo primero desde TMDB
+                Agrega lo primero desde {category.importer.name}
               </Link>
               .
             </>

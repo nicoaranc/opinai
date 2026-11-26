@@ -196,7 +196,10 @@ export class MediaService {
     const finalSlug =
       slug ??
       (await uniqueSlug(
-        [fields.title, year].filter(Boolean).join(' '),
+        // El año no se repite si el título ya lo lleva ("... 1997 2017")
+        year && !fields.title.includes(String(year))
+          ? `${fields.title} ${year}`
+          : fields.title,
         async (s) =>
           (await this.prisma.media.count({ where: { slug: s } })) > 0,
         [type.toLowerCase(), year].filter(Boolean).join('-'),
@@ -271,6 +274,19 @@ export class MediaService {
   // Borra también sus detalles, créditos, reseñas y listas de canciones (cascada)
   async remove(id: string): Promise<void> {
     await this.prisma.media.delete({ where: { id } });
+  }
+
+  // Agrega una canción a un álbum sin tocar el resto de la lista. Si la
+  // canción ya está o su posición está ocupada, no hace nada.
+  async addTrackToAlbum(
+    albumId: string,
+    trackId: string,
+    position: { discNumber: number; trackNumber: number },
+  ): Promise<void> {
+    await this.prisma.albumTrack.createMany({
+      data: [{ albumId, trackId, ...position }],
+      skipDuplicates: true,
+    });
   }
 
   async setTracks(albumId: string, dto: SetTracksDto) {

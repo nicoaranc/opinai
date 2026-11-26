@@ -1,3 +1,4 @@
+import type { ImportSource } from '../api/importers'
 import type { MediaType } from '../api/types'
 
 export interface CategoryView {
@@ -12,8 +13,8 @@ export interface Category {
   description: string
   // Música tiene dos vistas: álbumes y canciones
   views: CategoryView[]
-  // Tipo que se puede buscar en TMDB y agregar al catálogo (/peliculas/agregar)
-  tmdbType?: 'MOVIE' | 'SERIES'
+  // De dónde se pueden agregar obras al catálogo (/peliculas/agregar)
+  importer?: ImportSource
 }
 
 export const CATEGORIES: Category[] = [
@@ -22,14 +23,22 @@ export const CATEGORIES: Category[] = [
     label: 'Películas',
     description: 'Estrenos y clásicos del cine',
     views: [{ id: 'todas', label: 'Películas', types: ['MOVIE'] }],
-    tmdbType: 'MOVIE',
+    importer: {
+      provider: 'tmdb',
+      name: 'TMDB',
+      options: [{ id: 'peliculas', label: 'Películas', type: 'MOVIE' }],
+    },
   },
   {
     slug: 'series',
     label: 'Series',
     description: 'Temporadas completas y en emisión',
     views: [{ id: 'todas', label: 'Series', types: ['SERIES'] }],
-    tmdbType: 'SERIES',
+    importer: {
+      provider: 'tmdb',
+      name: 'TMDB',
+      options: [{ id: 'series', label: 'Series', type: 'SERIES' }],
+    },
   },
   {
     slug: 'musica',
@@ -39,6 +48,14 @@ export const CATEGORIES: Category[] = [
       { id: 'albumes', label: 'Álbumes', types: ['ALBUM'] },
       { id: 'canciones', label: 'Canciones', types: ['TRACK'] },
     ],
+    importer: {
+      provider: 'deezer',
+      name: 'Deezer',
+      options: [
+        { id: 'albumes', label: 'Álbumes', type: 'ALBUM' },
+        { id: 'canciones', label: 'Canciones', type: 'TRACK' },
+      ],
+    },
   },
   {
     slug: 'videojuegos',

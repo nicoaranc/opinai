@@ -1,7 +1,9 @@
-// Las portadas de TMDB se guardan en tamaño w500. Para la rejilla se pide una
-// más pequeña cambiando ese segmento de la URL (ahorra datos en móvil).
-// Las URLs de otros orígenes se devuelven tal cual.
+// Las portadas de TMDB y Deezer se guardan en un tamaño intermedio. Según
+// dónde se muestren se pide otro tamaño cambiando ese segmento de la URL
+// (ahorra datos en móvil). Las URLs de otros orígenes se devuelven tal cual.
 const TMDB_IMAGE = /^(https:\/\/image\.tmdb\.org\/t\/p\/)[^/]+(\/.+)$/
+// https://cdn-images.dzcdn.net/images/cover/<hash>/500x500-000000-80-0-0.jpg
+const DEEZER_IMAGE = /^(https:\/\/cdn-images\.dzcdn\.net\/images\/[a-z]+\/[0-9a-f]+\/)\d+x\d+(-.+)$/
 
 export type ImageSize = 'small' | 'medium' | 'large'
 
@@ -11,7 +13,17 @@ const TMDB_SIZES: Record<ImageSize, string> = {
   large: 'w500',
 }
 
+// Cuadradas (álbumes y canciones)
+const DEEZER_SIZES: Record<ImageSize, string> = {
+  small: '250x250',
+  medium: '500x500',
+  large: '500x500',
+}
+
 export function imageSrc(url: string, size: ImageSize): string {
-  const match = TMDB_IMAGE.exec(url)
-  return match ? `${match[1]}${TMDB_SIZES[size]}${match[2]}` : url
+  const tmdb = TMDB_IMAGE.exec(url)
+  if (tmdb) return `${tmdb[1]}${TMDB_SIZES[size]}${tmdb[2]}`
+  const deezer = DEEZER_IMAGE.exec(url)
+  if (deezer) return `${deezer[1]}${DEEZER_SIZES[size]}${deezer[2]}`
+  return url
 }

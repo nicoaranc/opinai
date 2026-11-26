@@ -1,4 +1,4 @@
-// Créditos de las fuentes de datos (TMDB exige este aviso)
+// Créditos de las fuentes de datos (TMDB exige su aviso; Deezer pide atribución)
 export function Footer() {
   return (
     <footer className="footer">
@@ -10,6 +10,13 @@ export function Footer() {
           </a>
           . Este producto usa la API de TMDB, pero no está avalado ni
           certificado por TMDB.
+        </p>
+        <p>
+          Datos e imágenes de música:{' '}
+          <a href="https://www.deezer.com/" target="_blank" rel="noreferrer">
+            Deezer
+          </a>
+          .
         </p>
         <p>opinai es un proyecto personal sin fines comerciales.</p>
       </div>
