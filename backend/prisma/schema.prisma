@@ -117,8 +117,15 @@ model Media {
   backdropUrl   String?
   language      String?   @db.VarChar(8) // ISO 639-1, p. ej. "es"
   country       String?   @db.VarChar(2) // ISO 3166-1, p. ej. "CL"
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+
+  // Estadísticas de reseñas, recalculadas en cada alta, edición o baja de una
+  // reseña (permiten ordenar por nota o popularidad sin agregar en cada consulta)
+  ratingAvg   Float? // promedio de las notas (1–10); null si nadie puntuó
+  ratingCount Int    @default(0) // reseñas con nota
+  reviewCount Int    @default(0) // total de reseñas (con o sin nota)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Detalles según el tipo (1:1; solo existe el que corresponde a `type`)
   movie  MovieDetails?
@@ -138,6 +145,8 @@ model Media {
 
   @@index([type, releaseDate])
   @@index([title])
+  @@index([ratingAvg])
+  @@index([reviewCount])
   @@map("media")
 }
 
@@ -270,12 +279,13 @@ model Genre {
 // Reseñas y valoraciones
 // ─────────────────────────────────────────────
 
-// Una por usuario y obra. Sin `body` es solo una valoración.
+// Una por usuario y obra. Tiene nota, texto o ambos (la app exige al menos uno):
+// solo nota = valoración; solo texto = reseña sin puntuar.
 model Review {
   id               String   @id @default(uuid(7)) @db.Uuid
   userId           String   @db.Uuid
   mediaId          String   @db.Uuid
-  rating           Int      @db.SmallInt // 1–10 (equivale a 0,5–5 estrellas)
+  rating           Int?     @db.SmallInt // 1–10 (equivale a 0,5–5 estrellas)
   title            String?
   body             String?
   containsSpoilers Boolean  @default(false)
@@ -287,6 +297,7 @@ model Review {
 
   @@unique([userId, mediaId])
   @@index([mediaId, createdAt])
+  @@index([userId, createdAt])
   @@map("reviews")
 }
 

@@ -12,6 +12,7 @@ import {
   UserRole,
 } from '../src/generated/prisma/client.js';
 import { PasswordService } from '../src/auth/password.service.js';
+import { recomputeMediaStats } from '../src/media/media-stats.js';
 import { assertSafeToSeed } from './seed-guard.js';
 
 // Solo contra una base local y nunca en producción (ver seed-guard.ts)
@@ -305,8 +306,19 @@ async function main() {
         body: 'El mapa más satisfactorio del género. Algunos jefes opcionales son crueles.',
       },
       { userId: admin.id, mediaId: hollowKnight.id, rating: 8 },
+      // Reseña sin nota
+      {
+        userId: bruno.id,
+        mediaId: arrival.id,
+        body: 'No sé qué nota ponerle: la vi una sola vez y me dejó pensando días.',
+      },
     ],
   });
+
+  // Estadísticas de cada obra (en la app las recalcula cada alta de reseña)
+  for (const { id } of await prisma.media.findMany({ select: { id: true } })) {
+    await prisma.$transaction((tx) => recomputeMediaStats(tx, id));
+  }
 
   console.log('Seed completado:', {
     users: await prisma.user.count(),

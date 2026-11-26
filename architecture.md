@@ -1,7 +1,7 @@
 # Arquitectura de opinai
 
 > Documento vivo: se actualiza cada vez que se agrega o cambia una parte del sistema.
-> Última actualización: 2026-11-25 (endurecimiento de la autenticación)
+> Última actualización: 2026-11-26 (API REST de catálogo, reseñas y usuarios; nota opcional)
 
 opinai es una plataforma de reseñas y valoraciones de **películas, series, música (álbumes y canciones) y videojuegos**.
 
@@ -49,6 +49,7 @@ flowchart LR
 | Rate limiting | `@nestjs/throttler` | 6.8 |
 | Cookies | `cookie-parser` | 1.4 |
 | Health checks | `@nestjs/terminus` | 12.2 |
+| Documentación API | `@nestjs/swagger` (OpenAPI desde los esquemas Zod) | 12.1 |
 | Tests | Vitest | 4 |
 | Scripts TS (seed) | tsx | 4 |
 | Lint / formato | oxlint / Prettier | |
@@ -71,10 +72,14 @@ opinai/
     │   ├── main.ts            ← arranque: prefijo /api, cookies, CORS, validación, proxy
     │   ├── app.module.ts      ← módulo raíz: config, rate limit, guards y filtro globales
     │   ├── config/env.ts      ← esquema Zod de las variables de entorno
-    │   ├── common/filters/    ← AllExceptionsFilter (formato de errores)
+    │   ├── common/            ← filtro de errores, paginación, params, slugs, selects compartidos
     │   ├── prisma/            ← PrismaModule (global) + PrismaService
     │   ├── auth/              ← registro, login, sesiones, guards y decoradores
-    │   ├── users/             ← publicUserSelect (campos públicos de un usuario)
+    │   ├── media/             ← obras (catálogo), listas de canciones, estadísticas
+    │   ├── creators/          ← creadores y su obra
+    │   ├── genres/            ← géneros
+    │   ├── reviews/           ← reseñas y valoraciones
+    │   ├── users/             ← perfiles públicos y edición del propio
     │   ├── health/            ← GET /api/health
     │   └── generated/prisma/  ← cliente Prisma generado (no se versiona)
     └── test/                  ← tests e2e
@@ -117,6 +122,11 @@ NestJS en modo **ESM**: los imports relativos terminan en `.js`. Todas las rutas
 | `ThrottlerModule` | Rate limiting en memoria por IP: 100 peticiones por minuto en general, y más estricto en autenticación. |
 | `PrismaModule` | **Global**. Expone `PrismaService` (un `PrismaClient` con el adapter `pg`, que conecta usando `DATABASE_URL` desde `ConfigService`). |
 | `AuthModule` | Registro, login, logout y usuario actual. Exporta `SessionService` y `PasswordService`. Detalles en [Autenticación](#autenticación). |
+| `MediaModule` | Catálogo: listar, buscar, filtrar y ordenar obras; detalle con los datos del tipo, géneros, créditos, canciones o álbumes, distribución de notas y la reseña propia. Alta, edición y baja (ADMIN). |
+| `CreatorsModule` | Creadores: lista, perfil (con los roles en que aparece) y su obra paginada. Alta, edición y baja (ADMIN). |
+| `GenresModule` | Géneros con cuántas obras tiene cada uno. Alta, edición y baja (ADMIN). |
+| `ReviewsModule` | Reseñas: listar las de una obra, crear la propia, editarla y borrarla. Mantiene las estadísticas de cada obra. Exporta `ReviewsService`. |
+| `UsersModule` | Perfil público de un usuario con estadísticas, sus reseñas y edición del perfil propio. |
 | `HealthModule` | `GET /api/health` con Terminus: hace ping a la base de datos (`SELECT 1`, timeout de 3 s). Público y sin rate limit. |
 | `ObserveModule` | Telemetría de NestJS Observe, incluida en la plantilla. Inactiva hasta que se vincule con `npx @nestjs/observe link`. |
 
@@ -131,6 +141,22 @@ NestJS en modo **ESM**: los imports relativos terminan en `.js`. Todas las rutas
 - **CORS**: solo se aceptan los orígenes de `CORS_ORIGINS`, con `credentials: true`.
 - **Proxy**: `trust proxy` = `TRUST_PROXY`, para que `req.ip` (rate limit y sesiones) sea la IP real detrás de Render.
 - **Shutdown hooks** activados, para que Prisma cierre conexiones cuando Render detiene el servicio.
+- **Swagger** en `/api/docs` (JSON en `/api/docs-json`), **solo fuera de producción**. Los cuerpos y parámetros salen de los mismos esquemas Zod que validan, así que la documentación no se desactualiza.
+
+### Convenciones de la API REST
+
+- **Recursos en plural** (`/media`, `/creators`, `/genres`, `/reviews`, `/users`) y verbos HTTP: `GET` lee, `POST` crea (`201`), `PATCH` edita parcialmente, `PUT` reemplaza (lista de canciones), `DELETE` borra (`204`).
+- **Lecturas por ID o slug** (`/media/parasite-2019` o `/media/<uuid>`); **escrituras solo por ID**. Los IDs se validan como UUID (`400` si no lo son).
+- **Listas paginadas**: `?page=1&pageSize=20` (máximo 50). Respuesta: `{ items, page, pageSize, total, totalPages }`. Géneros es la excepción: devuelve todos.
+- **Filtros y orden** por query string, por ejemplo `?type=MOVIE,SERIES&genre=drama&sort=rating`.
+- **Campos desconocidos** en el body se rechazan con `400` (`z.strictObject`). En `PATCH`, `null` (o `""` en textos) borra un campo opcional.
+- **Anidación de un nivel**, solo cuando el recurso pertenece a otro: `/media/:id/reviews`, `/creators/:slug/media`, `/users/:username/reviews`.
+- **Sin HATEOAS** (REST pragmático): las respuestas no incluyen enlaces de navegación.
+- **Lo que aparece dentro de otro recurso usa un resumen** (`src/common/selects.ts`): `userSummary` (sin email), `creatorSummary` y `mediaSummary` (con sus créditos principales: director, artista o desarrolladora).
+
+### Estadísticas de las obras
+
+`Media` guarda `ratingAvg` (promedio de 1 a 10 con 2 decimales, `null` si nadie puntuó), `ratingCount` (reseñas con nota) y `reviewCount` (todas las reseñas). Se recalculan en la misma transacción en que se crea, edita o borra una reseña (`src/media/media-stats.ts`). Antes de escribir, la transacción **bloquea la fila de la obra** (`SELECT … FOR UPDATE`), así que dos reseñas simultáneas de la misma obra no dejan el promedio desactualizado. Así se puede ordenar el catálogo por nota o popularidad sin agregar en cada consulta.
 
 ### Autenticación
 
@@ -167,7 +193,7 @@ handler(@CurrentUser() user: PublicUser) {}
 - `schema.prisma` no lleva URL. La CLI la toma de `prisma.config.ts` (`DIRECT_URL`) y la app la pasa al adapter en `PrismaService` (`DATABASE_URL`).
 - El cliente se genera en `src/generated/prisma` con el generator `prisma-client` (ESM). Se importa desde `../generated/prisma/client.js`.
 - `migrate dev` no regenera el cliente. Después de migrar hay que ejecutar `npm run db:generate`.
-- **Seed** (`prisma/seed.ts`, se ejecuta con tsx): **borra todos los datos** y crea 3 usuarios (`admin@opinai.local` con rol ADMIN, `ana@opinai.local` y `bruno@opinai.local`, todos con la contraseña **`opinai123`**), 7 géneros, 5 creadores, 11 obras (2 películas, 1 serie, 1 álbum con 6 canciones, 1 juego) y 8 reseñas. Se puede repetir sin problemas. **Solo corre contra una base local** (`localhost`, `127.0.0.1` o `::1`) y nunca con `NODE_ENV=production` (`prisma/seed-guard.ts`). Así, aunque el `.env` local apunte a Supabase, no puede borrar producción ni crear un ADMIN con contraseña conocida.
+- **Seed** (`prisma/seed.ts`, se ejecuta con tsx): **borra todos los datos** y crea 3 usuarios (`admin@opinai.local` con rol ADMIN, `ana@opinai.local` y `bruno@opinai.local`, todos con la contraseña **`opinai123`**), 7 géneros, 5 creadores, 11 obras (2 películas, 1 serie, 1 álbum con 6 canciones, 1 juego) y 9 reseñas (una sin nota), y calcula las estadísticas de cada obra. Se puede repetir sin problemas. **Solo corre contra una base local** (`localhost`, `127.0.0.1` o `::1`) y nunca con `NODE_ENV=production` (`prisma/seed-guard.ts`). Así, aunque el `.env` local apunte a Supabase, no puede borrar producción ni crear un ADMIN con contraseña conocida.
 
 ### Scripts
 
@@ -209,13 +235,13 @@ erDiagram
 |---|---|---|
 | `User` | `users` | Quien reseña y valora. Rol `USER` o `ADMIN`. Email y username únicos (en minúsculas). |
 | `Session` | `sessions` | Sesión iniciada. `id` = hash SHA-256 del token de la cookie. Guarda caducidad, última actividad, user agent e IP. Se borra en cascada con el usuario. |
-| `Media` | `media` | Todo lo reseñable. `type`: `MOVIE`, `SERIES`, `ALBUM`, `TRACK`, `GAME`. Campos comunes: título, sinopsis, fecha, portada, idioma, país. |
+| `Media` | `media` | Todo lo reseñable. `type`: `MOVIE`, `SERIES`, `ALBUM`, `TRACK`, `GAME`. Campos comunes: título, sinopsis, fecha, portada, idioma, país. Guarda además las estadísticas de reseñas (`ratingAvg`, `ratingCount`, `reviewCount`). |
 | `MovieDetails` … `GameDetails` | `*_details` | Datos propios de cada tipo, en relación 1:1 con `Media`. |
 | `AlbumTrack` | `album_tracks` | Lista de canciones de un álbum (disco y número de pista). Una canción puede estar en varios álbumes. |
 | `Creator` | `creators` | Personas, grupos o empresas (`PERSON`, `GROUP`, `COMPANY`). |
 | `Credit` | `credits` | Une `Media` con `Creator` y un rol: `DIRECTOR`, `SHOWRUNNER`, `WRITER`, `PRIMARY_ARTIST`, `FEATURED_ARTIST`, `PRODUCER`, `DEVELOPER`, `PUBLISHER`. |
 | `Genre` | `genres` | Géneros (relación muchos a muchos con `Media`). |
-| `Review` | `reviews` | Una por usuario y obra. Puntuación de 1 a 10 (0,5–5 estrellas). Si no tiene `body`, es solo una valoración. |
+| `Review` | `reviews` | Una por usuario y obra. Tiene **nota, texto o ambos**: `rating` (1–10, equivale a 0,5–5 estrellas) y `body` son opcionales, pero no pueden faltar los dos. Un `title` exige `body`. Las reseñas sin nota no cuentan en el promedio. La base lo garantiza con dos `CHECK` (`reviews_rating_range`, `reviews_rating_or_body`). |
 | `ExternalId` | `external_ids` | IDs de la obra en servicios externos (`tmdb`, `igdb`…). Todavía no se usa. |
 
 ## 7. API
@@ -231,7 +257,48 @@ Base: `/api`. 🔓 = pública, 🔒 = requiere sesión.
 | `POST` | `/api/auth/logout` | 🔒 | Cierra la sesión actual | `204` y borra la cookie |
 | `GET` | `/api/auth/me` | 🔒 | Usuario de la sesión actual | `200` `{ user }` · `401` sin sesión |
 
-`user` = `{ id, email, username, displayName, avatarUrl, bio, role, createdAt }`.
+### Catálogo
+
+| Método | Ruta | Acceso | Descripción |
+|---|---|---|---|
+| `GET` | `/api/media` | 🔓 | Lista paginada. Filtros: `type` (uno o varios separados por comas; **sin indicarlo, todos menos `TRACK`**), `q` (título u original, sin distinguir mayúsculas), `genre` (slug), `creator` (slug), `year`. `sort`: `recent` (por defecto), `oldest`, `title`, `rating`, `popular`, `added`. |
+| `GET` | `/api/media/:idOrSlug` | 🔓 | Detalle: campos comunes, `details` del tipo, `genres`, `credits`, `ratingDistribution` (cuántas notas hay de cada valor del 1 al 10), `tracks` (si es álbum), `albums` (si es canción) y `myReview` (la reseña propia si hay sesión, si no `null`). |
+| `POST` | `/api/media` | 🔒 ADMIN | Crea una obra. Body: `type`, `title` y opcionales (`slug`, `originalTitle`, `synopsis`, `releaseDate` `AAAA-MM-DD`, `coverUrl`, `backdropUrl`, `language`, `country`, `genres` (slugs), `credits` (`[{ creatorId, role, position? }]`), `details` del tipo). Sin `slug` se genera a partir del título y el año (`dune-parte-dos-2024`, con `-2` si se repite). Los roles deben corresponder al tipo (p. ej. `DEVELOPER` solo en juegos). |
+| `PATCH` | `/api/media/:id` | 🔒 ADMIN | Edita. `genres` y `credits` reemplazan la lista completa. `details` solo cambia los campos enviados. El `type` no se puede cambiar. |
+| `DELETE` | `/api/media/:id` | 🔒 ADMIN | Borra la obra con sus reseñas, créditos y detalles. |
+| `PUT` | `/api/media/:id/tracks` | 🔒 ADMIN | Reemplaza la lista de canciones de un álbum: `{ tracks: [{ trackId, discNumber?, trackNumber }] }`. Las canciones deben existir como `TRACK`. |
+| `GET` | `/api/creators` | 🔓 | Lista paginada. Filtros: `q`, `kind`. |
+| `GET` | `/api/creators/:idOrSlug` | 🔓 | Perfil con `creditsCount` y `roles` (en qué roles aparece y cuántas veces). |
+| `GET` | `/api/creators/:idOrSlug/media` | 🔓 | Su obra paginada, más reciente primero. Filtros: `role`, `type`. |
+| `POST` · `PATCH` · `DELETE` | `/api/creators[/:id]` | 🔒 ADMIN | Alta (`kind`, `name`, `slug?`, `bio?`, `imageUrl?`, `country?`), edición y baja (borra sus créditos, no las obras). |
+| `GET` | `/api/genres` | 🔓 | Todos los géneros con `mediaCount`. |
+| `POST` · `PATCH` · `DELETE` | `/api/genres[/:id]` | 🔒 ADMIN | Alta (`name`, `slug?`), edición y baja. |
+
+### Reseñas
+
+| Método | Ruta | Acceso | Descripción |
+|---|---|---|---|
+| `GET` | `/api/media/:idOrSlug/reviews` | 🔓 | Reseñas de una obra, con su autor. `sort`: `recent` (por defecto), `oldest`, `rating_desc`, `rating_asc` (las sin nota van al final). `withText=true`: solo las que tienen texto. |
+| `POST` | `/api/media/:id/reviews` | 🔒 | Crea la reseña propia: `{ rating?, title?, body?, containsSpoilers? }`, con nota, texto o ambos. `409` si ya existe (el mensaje indica su ID). |
+| `GET` | `/api/reviews/:id` | 🔓 | Una reseña con su autor y su obra. |
+| `PATCH` | `/api/reviews/:id` | 🔒 autor | Edita. `null` quita la nota o el texto, siempre que quede uno de los dos. `403` si no es tuya. |
+| `DELETE` | `/api/reviews/:id` | 🔒 autor o ADMIN | Borra (un ADMIN puede moderar reseñas ajenas). |
+
+### Usuarios
+
+| Método | Ruta | Acceso | Descripción |
+|---|---|---|---|
+| `GET` | `/api/users/:username` | 🔓 | Perfil público (**sin email**) con `stats`: `reviewCount`, `writtenCount` (con texto), `ratingCount` y `ratingAvg`. |
+| `GET` | `/api/users/:username/reviews` | 🔓 | Sus reseñas con la obra. Mismos `sort` y `withText` que arriba, más `type`. |
+| `PATCH` | `/api/users/me` | 🔒 | Edita el perfil propio: `displayName`, `bio`, `avatarUrl` (`""` o `null` los borra). |
+
+### Formas de las respuestas
+
+- `user` (auth) = `{ id, email, username, displayName, avatarUrl, bio, role, createdAt }`. Solo se devuelve al propio usuario.
+- `userSummary` = `{ id, username, displayName, avatarUrl }`.
+- `mediaSummary` = `{ id, type, slug, title, originalTitle, releaseDate, coverUrl, ratingAvg, ratingCount, reviewCount, credits: [{ role, creator }] }` (hasta 3 créditos principales).
+- `review` = `{ id, rating, title, body, containsSpoilers, createdAt, updatedAt }`, más `user` y/o `media` según el endpoint.
+- Las fechas van en ISO 8601. `releaseDate` y `endDate` son fechas sin hora (`2019-05-30T00:00:00.000Z`).
 
 Respuestas comunes: `401` sin sesión en una ruta 🔒, `403` rol insuficiente u `Origin` no permitido, `429` demasiadas peticiones.
 
@@ -270,11 +337,15 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 
 - **Una tabla `Media` y detalles por tipo.** Reseñas, géneros y créditos apuntan a una sola tabla. Los campos propios de cada tipo quedan tipados en tablas 1:1 en vez de un JSON.
 - **Álbumes y canciones son `Media` independientes**, así que cada uno tiene sus propias reseñas. `AlbumTrack` los relaciona.
-- **Reseña y valoración en un solo modelo.** Si `body` está vacío, es solo una puntuación. Hay una por usuario y obra (`@@unique([userId, mediaId])`).
+- **Reseña y valoración en un solo modelo, con nota opcional.** Una reseña puede ser solo nota, solo texto o ambas, como en los sitios que publican reseñas sin puntuar. Las que no tienen nota no afectan al promedio. Hay una por usuario y obra (`@@unique([userId, mediaId])`).
 - **Créditos con rol** en vez de un campo "director" o "artista". Permite varios creadores y roles por obra.
 - **Sin Docker para back y front en producción.** Render los ejecuta de forma nativa; Docker solo se usa para la base de datos local.
 - **APIs externas (futuro): importar bajo demanda y guardar en la base**, identificando cada obra por `ExternalId`, en vez de consultar la API en cada petición.
-- **El rango de `rating` (1–10) se valida en la aplicación.** Prisma no declara restricciones `CHECK`.
+- **Las reglas de la reseña se validan en la app y en la base.** Zod da mensajes claros, y dos `CHECK` añadidos a mano en una migración (Prisma no los declara) protegen ante escrituras directas.
+- **API REST pragmática** en vez de GraphQL o tRPC: el dominio son recursos con CRUD, la caché HTTP sirve para un catálogo de mucha lectura y encaja con las cookies, los guards y el rate limit por ruta. Sin HATEOAS.
+- **Estadísticas desnormalizadas en `Media`** en vez de calcularlas en cada consulta, para poder ordenar y paginar por nota o popularidad. Se recalculan con la fila bloqueada.
+- **Las canciones no aparecen en el catálogo general** salvo que se pidan (`type=TRACK`), porque un solo álbum añade decenas.
+- **Los roles de crédito se validan según el tipo de obra** (`ALLOWED_ROLES` en `media.schemas.ts`).
 - **Validación con Zod (Standard Schema) en vez de `class-validator`.** Es el enfoque nativo de Nest 12: sin clases ni decoradores, y el mismo esquema da el tipo TypeScript. También se usa para las variables de entorno.
 - **Los errores 500 nunca exponen detalles al cliente.** Se registran en el log del servidor.
 - **Autenticación propia** (no Supabase Auth): sin dependencia de un proveedor, usuarios en nuestra propia tabla y desarrollo local solo con Postgres.
@@ -292,6 +363,8 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - **Los rate limits y el bloqueo por cuenta viven en memoria**: se reinician con el servidor y no sirven con varias instancias.
 - **No existe "cerrar sesión en todos los dispositivos"** ni se invalidan las sesiones al cambiar la contraseña (todavía no hay endpoint para cambiarla).
 - **No hay cabeceras de seguridad** (`helmet`) ni limpieza periódica de sesiones caducadas.
+- **La búsqueda usa `ILIKE`** (`contains` sin distinguir mayúsculas) sin índice de texto: no ignora tildes ("parasitos" no encuentra "Parásitos") y se volverá lenta con un catálogo grande. Mejora futura: `pg_trgm` o búsqueda de texto completo con `unaccent`.
+- **Borrar una obra borra sus reseñas** (cascada), sin papelera.
 
 ## 10. Estado y próximos pasos
 
@@ -302,10 +375,10 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [x] Configuración validada, validación global con Zod, CORS y formato uniforme de errores
 - [x] Seed con datos de ejemplo
 - [x] Autenticación: registro, login, logout, sesión actual, roles, rate limit y protección CSRF
+- [x] API REST: catálogo (obras, creadores, géneros), reseñas con nota opcional, perfiles de usuario y Swagger
 - [x] Endurecimiento: `NODE_ENV` obligatoria, seed solo en local, argon2 con límite de memoria, bloqueo por cuenta y `CORS_ORIGINS` obligatoria en producción
 
 **Pendiente**
-- [ ] CRUD de obras, creadores y reseñas
 - [ ] Frontend (React + Vite)
 - [ ] Recuperar contraseña y verificar email (requiere servicio de correo)
 - [ ] Login con Google o GitHub
