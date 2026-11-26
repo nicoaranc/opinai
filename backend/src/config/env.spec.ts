@@ -33,6 +33,30 @@ describe('envSchema', () => {
     ).toEqual(['https://opinai.app']);
   });
 
+  it('trata los secretos vacíos como no definidos', () => {
+    const env = envSchema.parse({
+      ...base,
+      TMDB_ACCESS_TOKEN: '',
+      IGDB_CLIENT_ID: ' ',
+      IGDB_CLIENT_SECRET: '',
+    });
+    expect(env.TMDB_ACCESS_TOKEN).toBeUndefined();
+    expect(env.IGDB_CLIENT_ID).toBeUndefined();
+  });
+
+  it('exige las dos credenciales de IGDB juntas', () => {
+    const result = envSchema.safeParse({ ...base, IGDB_CLIENT_ID: 'abc' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['IGDB_CLIENT_SECRET']);
+    expect(
+      envSchema.safeParse({
+        ...base,
+        IGDB_CLIENT_ID: 'abc',
+        IGDB_CLIENT_SECRET: 'xyz',
+      }).success,
+    ).toBe(true);
+  });
+
   it('interpreta COOKIE_SECURE como booleano', () => {
     expect(
       envSchema.parse({ ...base, COOKIE_SECURE: 'true' }).COOKIE_SECURE,

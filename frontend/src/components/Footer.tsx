@@ -1,4 +1,4 @@
-// Créditos de las fuentes de datos (TMDB exige su aviso; Deezer pide atribución)
+// Créditos de las fuentes de datos (TMDB exige su aviso; Deezer e IGDB piden atribución)
 export function Footer() {
   return (
     <footer className="footer">
@@ -15,6 +15,13 @@ export function Footer() {
           Datos e imágenes de música:{' '}
           <a href="https://www.deezer.com/" target="_blank" rel="noreferrer">
             Deezer
+          </a>
+          .
+        </p>
+        <p>
+          Datos e imágenes de videojuegos:{' '}
+          <a href="https://www.igdb.com/" target="_blank" rel="noreferrer">
+            IGDB
           </a>
           .
         </p>

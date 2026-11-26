@@ -12,6 +12,14 @@ const csv = z
   )
   .pipe(z.array(z.url()));
 
+// Texto opcional; vacío cuenta como no definido (p. ej. `TMDB_ACCESS_TOKEN=`
+// copiado tal cual de .env.example)
+const optionalSecret = z
+  .string()
+  .trim()
+  .transform((value) => value || undefined)
+  .optional();
+
 // Variables que necesita la app. Si falta una obligatoria, Nest no arranca.
 export const envSchema = z
   .object({
@@ -30,13 +38,20 @@ export const envSchema = z
     TRUST_PROXY: z.coerce.number().int().min(0).default(0),
     // Token de lectura de TMDB (películas y series). Sin él, la búsqueda y la
     // importación desde TMDB responden 503; el resto de la app funciona igual.
-    TMDB_ACCESS_TOKEN: z
-      .string()
-      .trim()
-      .transform((value) => value || undefined)
-      .optional(),
+    TMDB_ACCESS_TOKEN: optionalSecret,
+    // Credenciales de una app de Twitch para IGDB (videojuegos). Opcionales,
+    // pero van juntas: sin ellas, /api/igdb/* responde 503.
+    IGDB_CLIENT_ID: optionalSecret,
+    IGDB_CLIENT_SECRET: optionalSecret,
   })
   .superRefine((env, ctx) => {
+    if (Boolean(env.IGDB_CLIENT_ID) !== Boolean(env.IGDB_CLIENT_SECRET)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [env.IGDB_CLIENT_ID ? 'IGDB_CLIENT_SECRET' : 'IGDB_CLIENT_ID'],
+        message: 'IGDB_CLIENT_ID e IGDB_CLIENT_SECRET deben definirse juntas',
+      });
+    }
     if (env.NODE_ENV === 'production' && !env.CORS_ORIGINS?.length) {
       ctx.addIssue({
         code: 'custom',

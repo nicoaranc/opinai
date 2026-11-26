@@ -62,6 +62,11 @@ export const CATEGORIES: Category[] = [
     label: 'Videojuegos',
     description: 'De indies a grandes producciones',
     views: [{ id: 'todos', label: 'Videojuegos', types: ['GAME'] }],
+    importer: {
+      provider: 'igdb',
+      name: 'IGDB',
+      options: [{ id: 'videojuegos', label: 'Videojuegos', type: 'GAME' }],
+    },
   },
 ]
 

@@ -148,6 +148,14 @@ async function main() {
     CreatorKind.COMPANY,
     'AU',
   );
+  // ID real en IGDB: al importar sus juegos se reutiliza este creador
+  await prisma.creatorExternalId.create({
+    data: {
+      creatorId: teamCherry.id,
+      provider: 'igdb',
+      externalId: 'company:7263',
+    },
+  });
 
   // ── Películas ───────────────────────────────
   const parasite = await prisma.media.create({
@@ -306,6 +314,8 @@ async function main() {
     data: {
       type: MediaType.GAME,
       slug: 'hollow-knight',
+      // ID real en IGDB: importar este juego devuelve el del seed
+      externalIds: { create: { provider: 'igdb', externalId: 'game:14593' } },
       title: 'Hollow Knight',
       synopsis:
         'Explora Hallownest, un reino de insectos en ruinas bajo la tierra.',

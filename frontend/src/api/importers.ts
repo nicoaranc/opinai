@@ -5,7 +5,7 @@ import type { MediaDetail, MediaType } from './types'
 // su propio formato de búsqueda en el back; aquí se unifican para la página
 // de "Agregar".
 
-export type Provider = 'tmdb' | 'deezer'
+export type Provider = 'tmdb' | 'deezer' | 'igdb'
 
 export interface ImportOption {
   id: string // ?tipo= en la URL
@@ -15,7 +15,7 @@ export interface ImportOption {
 
 export interface ImportSource {
   provider: Provider
-  name: string // "TMDB", "Deezer"
+  name: string // "TMDB", "Deezer", "IGDB"
   options: ImportOption[]
 }
 
@@ -60,13 +60,43 @@ interface DeezerItem {
   importedSlug: string | null
 }
 
+interface IgdbItem {
+  igdbId: number
+  type: MediaType
+  title: string
+  developer: string | null
+  year: number | null
+  platforms: string[]
+  overview: string | null
+  coverUrl: string | null
+  importedSlug: string | null
+}
+
 type RawPage<T> = Omit<SearchPage, 'items'> & { items: T[] }
 
 export function searchPath(provider: Provider, type: MediaType, q: string, page: number) {
-  return `/${provider}/search?${new URLSearchParams({ type, q, page: String(page) })}`
+  // IGDB solo tiene juegos: no lleva `type`
+  const params = new URLSearchParams({ q, page: String(page) })
+  if (provider !== 'igdb') params.set('type', type)
+  return `/${provider}/search?${params}`
 }
 
+const fromIgdb = (i: IgdbItem): SearchItem => ({
+  id: i.igdbId,
+  type: i.type,
+  title: i.title,
+  subtitle: i.developer,
+  detail: [i.year, i.platforms.join(', ')].filter(Boolean).join(' · ') || null,
+  // IGDB solo tiene sinopsis en inglés
+  overview: i.overview,
+  coverUrl: i.coverUrl,
+  importedSlug: i.importedSlug,
+})
+
 export function normalizePage(provider: Provider, raw: RawPage<unknown>): SearchPage {
+  if (provider === 'igdb') {
+    return { ...raw, items: (raw.items as IgdbItem[]).map(fromIgdb) }
+  }
   const items =
     provider === 'tmdb'
       ? (raw.items as TmdbItem[]).map(
@@ -98,7 +128,12 @@ export function normalizePage(provider: Provider, raw: RawPage<unknown>): Search
 
 // Importa la obra (o devuelve la existente si ya estaba)
 export function importItem(provider: Provider, type: MediaType, id: number) {
-  const body = provider === 'tmdb' ? { type, tmdbId: id } : { type, deezerId: id }
+  const body =
+    provider === 'tmdb'
+      ? { type, tmdbId: id }
+      : provider === 'deezer'
+        ? { type, deezerId: id }
+        : { igdbId: id }
   return api<{ created: boolean; media: MediaDetail }>(`/${provider}/imports`, {
     method: 'POST',
     body: JSON.stringify(body),

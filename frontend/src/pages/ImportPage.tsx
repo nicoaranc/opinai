@@ -22,6 +22,7 @@ const PLACEHOLDERS: Record<string, string> = {
   SERIES: 'Ej.: Breaking Bad',
   ALBUM: 'Ej.: OK Computer',
   TRACK: 'Ej.: Karma Police',
+  GAME: 'Ej.: Hollow Knight',
 }
 
 // Buscar en una fuente externa (TMDB, Deezer) y agregar al catálogo:
