@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/auth-context'
-
-export type AuthMode = 'login' | 'register'
+import type { AuthMode } from '../auth/auth-dialog'
 
 interface Props {
   // null = cerrada

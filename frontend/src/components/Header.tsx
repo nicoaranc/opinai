@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { Link, NavLink } from 'react-router'
 import { useAuth } from '../auth/auth-context'
-import { AuthDialog, type AuthMode } from './AuthDialog'
+import { useOpenAuthDialog } from '../auth/auth-dialog'
+import { CATEGORIES } from '../lib/categories'
 
 export function Header() {
   const { state, logout } = useAuth()
-  const [dialogMode, setDialogMode] = useState<AuthMode | null>(null)
+  const openAuth = useOpenAuthDialog()
   const [loggingOut, setLoggingOut] = useState(false)
 
   async function handleLogout() {
@@ -22,10 +24,10 @@ export function Header() {
   return (
     <header className="header">
       <div className="header-inner">
-        <a href="/" className="brand">
+        <Link to="/" className="brand">
           <span className="brand-mark" aria-hidden="true" />
           opinai
-        </a>
+        </Link>
 
         <div className="header-actions" aria-live="polite">
           {state.status === 'authenticated' && (
@@ -48,14 +50,14 @@ export function Header() {
               <button
                 type="button"
                 className="button"
-                onClick={() => setDialogMode('login')}
+                onClick={() => openAuth('login')}
               >
                 Iniciar sesión
               </button>
               <button
                 type="button"
                 className="button button-primary"
-                onClick={() => setDialogMode('register')}
+                onClick={() => openAuth('register')}
               >
                 Crear cuenta
               </button>
@@ -64,11 +66,17 @@ export function Header() {
         </div>
       </div>
 
-      <AuthDialog
-        mode={dialogMode}
-        onModeChange={setDialogMode}
-        onClose={() => setDialogMode(null)}
-      />
+      <nav className="nav" aria-label="Categorías">
+        <ul className="nav-inner">
+          {CATEGORIES.map((category) => (
+            <li key={category.slug}>
+              <NavLink to={`/${category.slug}`} className="nav-link">
+                {category.label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
     </header>
   )
 }

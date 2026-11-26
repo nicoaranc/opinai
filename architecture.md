@@ -1,7 +1,7 @@
 # Arquitectura de opinai
 
 > Documento vivo: se actualiza cada vez que se agrega o cambia una parte del sistema.
-> Última actualización: 2026-11-26 (frontend: página principal, login y registro)
+> Última actualización: 2026-11-26 (frontend: categorías, listados, detalle de obras y reseñas)
 
 opinai es una plataforma de reseñas y valoraciones de **películas, series, música (álbumes y canciones) y videojuegos**.
 
@@ -39,7 +39,7 @@ flowchart LR
 
 | Capa | Tecnología | Versión |
 |---|---|---|
-| Frontend | React + Vite + TypeScript (sin router ni librería de UI por ahora) | React 19, Vite 8, TS 7 |
+| Frontend | React + Vite + TypeScript, React Router (sin librería de UI ni de estado) | React 19, Vite 8, TS 7, React Router 8 |
 | Backend | NestJS (ESM, Express) + TypeScript | Nest 12, TS 6 |
 | ORM | Prisma con driver adapter `@prisma/adapter-pg` | 7.10.1 |
 | Base de datos | PostgreSQL | 17 (local) |
@@ -67,12 +67,13 @@ opinai/
 │   ├── index.html
 │   ├── public/favicon.svg
 │   └── src/
-│       ├── main.tsx / App.tsx ← entrada: AuthProvider + Header + HomePage
+│       ├── main.tsx / App.tsx ← entrada: providers y rutas
 │       ├── index.css          ← estilos globales y variables de color (claro/oscuro)
-│       ├── api/client.ts      ← fetch a /api con manejo de errores del back
-│       ├── auth/              ← contexto de sesión (useAuth) y AuthProvider
-│       ├── components/        ← Header, AuthDialog (login y registro)
-│       └── pages/             ← HomePage
+│       ├── api/               ← client (fetch a /api), useApi, reviews, types
+│       ├── auth/              ← sesión (useAuth, AuthProvider) y apertura del login (useOpenAuthDialog)
+│       ├── lib/               ← categorías y formato (fechas, notas, etiquetas en español)
+│       ├── components/        ← Header, AuthDialog, MediaCard, Cover, Stars, StarRatingInput...
+│       └── pages/             ← HomePage, CategoryPage, NotFoundPage, media/ (detalle y reseñas)
 └── backend/
     ├── prisma.config.ts       ← config de la CLI de Prisma (schema, migraciones, seed, URL)
     ├── prisma/
@@ -113,7 +114,7 @@ Solo la base de datos está dockerizada. El back y el front corren con Node dire
 
 | Pieza | Servicio | Notas |
 |---|---|---|
-| Frontend | Render **Static Site** | `npm run build` y se sirve `dist/`. Regla *rewrite*: `/api/*` → URL del Web Service + `/api/*`. |
+| Frontend | Render **Static Site** | `npm run build` y se sirve `dist/`. Reglas *rewrite*, en este orden: `/api/*` → URL del Web Service + `/api/*`, y `/*` → `/index.html` (para que `/peliculas` u `/obra/...` funcionen al recargar). |
 | Backend | Render **Web Service** (runtime Node, sin Docker) | Health check en `/api/health`. En el plan gratis se duerme tras unos 15 minutos sin tráfico. |
 | Base de datos | Supabase | La app usa el *Transaction pooler* (6543) y las migraciones el *Session pooler* (5432, compatible con IPv4). |
 
@@ -221,7 +222,31 @@ handler(@CurrentUser() user: PublicUser) {}
 
 ## 5b. Frontend
 
-SPA de React con Vite. Por ahora tiene **solo la página principal, sin datos del catálogo**, el **registro**, y el **inicio y cierre de sesión**.
+SPA de React con Vite y React Router. Permite explorar el catálogo por categoría, ver cada obra y escribir reseñas y valoraciones, además del registro, el inicio y el cierre de sesión. Todavía no hay búsqueda, perfiles de usuario, páginas de creadores ni administración.
+
+### Rutas
+
+| Ruta | Página | Qué muestra |
+|---|---|---|
+| `/` | `HomePage` | Titular y las 4 categorías: Películas, Series, Música y Videojuegos. |
+| `/peliculas`, `/series`, `/musica`, `/videojuegos` | `CategoryPage` | Rejilla de obras del tipo, con orden (`?orden=recent\|rating\|popular\|title`) y paginación (`?pagina=`, 24 por página). Música tiene dos pestañas, Álbumes y Canciones (`?ver=albumes\|canciones`). Las categorías se definen en `src/lib/categories.ts`. |
+| `/obra/:slug` | `MediaDetailPage` | Portada, nota promedio, sinopsis, créditos, géneros y datos del tipo (duración, temporadas, plataformas...). Canciones del álbum o álbumes de la canción, con enlaces. Tu reseña y la lista de reseñas. |
+| cualquier otra | `NotFoundPage` | "No encontrado". |
+
+La cabecera tiene enlaces a las 4 categorías en todas las páginas.
+
+### Reseñas en el front
+
+- **Con sesión**, el detalle muestra un formulario (`ReviewForm`) con nota de 0,5 a 5 estrellas (`StarRatingInput`: 1–10 en la API), título, texto y "contiene spoilers". Se puede dejar solo nota, solo texto o ambos; el front valida las mismas reglas que el back antes de enviar. Si ya existe `myReview`, el formulario es de edición y permite borrarla.
+- **Sin sesión**, en su lugar aparecen botones para iniciar sesión o crear cuenta, que abren la misma ventana de la cabecera.
+- Al guardar o borrar, se vuelve a pedir el detalle (nota promedio y `myReview`) y la lista de reseñas.
+- **La lista** (`ReviewList`) se ordena por fecha o nota, filtra "solo con texto" y pagina de 10 en 10. Las reseñas con spoilers ocultan el texto hasta pulsar "Mostrar".
+- Las notas se muestran como estrellas (redondeo a media estrella) y como número de 0 a 5 con un decimal ("4,8").
+- Las obras sin portada muestran la inicial del título sobre un color según el tipo (`Cover`).
+
+### Datos
+
+`useApi(path, key?)` (`src/api/use-api.ts`) hace el `GET` y devuelve `{ data, error, loading, reload }`. Mientras carga una página nueva conserva los datos anteriores (la rejilla se atenúa en vez de vaciarse). `key` fuerza a volver a pedir: el detalle usa el ID del usuario, para traer `myReview` al iniciar o cerrar sesión. No hay caché entre páginas.
 
 ### Cómo habla con el back
 
@@ -237,9 +262,9 @@ SPA de React con Vite. Por ahora tiene **solo la página principal, sin datos de
 
 ### Interfaz
 
-- `Header`: marca, y "Iniciar sesión" y "Crear cuenta", o el nombre del usuario con "Cerrar sesión".
+- `Header`: marca, enlaces a las categorías, y "Iniciar sesión" y "Crear cuenta", o el nombre del usuario con "Cerrar sesión".
+- `AuthDialogProvider` monta la ventana de login una sola vez; cualquier componente la abre con `useOpenAuthDialog()('login' | 'register')`.
 - `AuthDialog`: `<dialog>` nativo con dos modos, login y registro, que se alternan desde la misma ventana (el email se conserva). Gestiona el foco y se cierra con Escape o clic fuera. El registro pide email, nombre de usuario, contraseña y nombre visible opcional; el navegador valida las mismas reglas que el back (usuario de 3 a 30 caracteres `A-Z a-z 0-9 _`, contraseña de 8 a 128). Muestra el mensaje de error del back (`400` por campo, `401`, `409` email o usuario en uso, `429`).
-- `HomePage`: titular y descripción; saluda al usuario si hay sesión.
 - Estilos en `index.css` con variables de color para tema claro y oscuro (`prefers-color-scheme`).
 
 ## 6. Modelo de datos
@@ -386,7 +411,8 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - **Sesiones hechas a mano con piezas maduras** (argon2, cookie-parser, throttler) en vez de `@nestjs/authentication`, porque ese paquete está en versión 0.1.x y su API aún puede cambiar. Si se estabiliza, se puede evaluar migrar.
 - **El front y el back comparten origen** (proxy de Vite en local, rewrite de Render en producción). Los subdominios de `onrender.com` cuentan como sitios distintos, así que sin esto la cookie `SameSite=Lax` no se enviaría.
 - **Seguro por defecto**: toda ruta nueva exige sesión salvo que se marque `@Public()`.
-- **El front empieza sin dependencias extra** (sin router, sin librería de estado ni de UI): solo hay una página. Se agregarán cuando haya más pantallas.
+- **El front tiene pocas dependencias**: React Router para las rutas y nada más. Los datos se piden con un hook propio (`useApi`) en vez de React Query, y los estilos son CSS plano con variables. Si aparecen necesidades como caché entre páginas, se puede pasar a React Query.
+- **Las rutas del front están en español** (`/peliculas`, `/obra/:slug`), las de la API en inglés (`/api/media`).
 - **Fallar al arrancar antes que arrancar inseguro.** `NODE_ENV` es obligatoria porque de ella dependen la cookie segura y otras protecciones, y `CORS_ORIGINS` es obligatoria en producción.
 
 ### Riesgos conocidos (aceptados por ahora)
@@ -410,11 +436,12 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [x] Seed con datos de ejemplo
 - [x] Autenticación: registro, login, logout, sesión actual, roles, rate limit y protección CSRF
 - [x] API REST: catálogo (obras, creadores, géneros), reseñas con nota opcional, perfiles de usuario y Swagger
-- [x] Frontend: página principal (sin datos) con registro, inicio y cierre de sesión
+- [x] Frontend: categorías, listados con orden y paginación, detalle de obras y reseñas (crear, editar, borrar), registro e inicio de sesión
 - [x] Endurecimiento: `NODE_ENV` obligatoria, seed solo en local, argon2 con límite de memoria, bloqueo por cuenta y `CORS_ORIGINS` obligatoria en producción
 
 **Pendiente**
-- [ ] Frontend: páginas de catálogo, detalle, reseñas y perfil
+- [ ] Frontend: búsqueda, perfiles de usuario, páginas de creadores y sección de administración
+- [ ] Script para dar rol ADMIN a un usuario (necesario antes de desplegar)
 - [ ] Recuperar contraseña y verificar email (requiere servicio de correo)
 - [ ] Login con Google o GitHub
 - [ ] Integración con APIs externas
