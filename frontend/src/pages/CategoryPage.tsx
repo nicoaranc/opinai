@@ -1,4 +1,4 @@
-import { useParams, useSearchParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import type { MediaSummary, Page } from '../api/types'
 import { useApi } from '../api/use-api'
 import { MediaCard } from '../components/MediaCard'
@@ -58,19 +58,26 @@ function CategoryListing({ category }: { category: Category }) {
     <main className="page">
       <div className="page-header">
         <h1>{category.label}</h1>
-        <label className="select-field">
-          <span>Ordenar por</span>
-          <select
-            value={sort}
-            onChange={(event) => update({ orden: event.target.value })}
-          >
-            {SORTS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="page-header-actions">
+          {category.tmdbType && (
+            <Link to={`/${category.slug}/agregar`} className="button">
+              + Agregar desde TMDB
+            </Link>
+          )}
+          <label className="select-field">
+            <span>Ordenar por</span>
+            <select
+              value={sort}
+              onChange={(event) => update({ orden: event.target.value })}
+            >
+              {SORTS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {category.views.length > 1 && (
@@ -92,7 +99,18 @@ function CategoryListing({ category }: { category: Category }) {
       {error && <ErrorState error={error} onRetry={reload} />}
       {!data && loading && <Loading />}
       {data && data.items.length === 0 && (
-        <p className="status">Todavía no hay nada en esta sección.</p>
+        <p className="status">
+          Todavía no hay nada en esta sección.
+          {category.tmdbType && (
+            <>
+              {' '}
+              <Link to={`/${category.slug}/agregar`}>
+                Agrega lo primero desde TMDB
+              </Link>
+              .
+            </>
+          )}
+        </p>
       )}
       {data && data.items.length > 0 && (
         <>

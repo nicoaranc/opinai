@@ -12,6 +12,7 @@ import {
 } from '../common/selects.js';
 import { uniqueSlug } from '../common/slug.js';
 import { MediaType, type Prisma } from '../generated/prisma/client.js';
+import type { ExternalRef } from '../integrations/imported-media.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   ALLOWED_ROLES,
@@ -180,7 +181,13 @@ export class MediaService {
     };
   }
 
-  async create(dto: CreateMediaDto) {
+  // `externalIds`: solo para importaciones (no se expone en la API). Se crean
+  // en la misma sentencia, así que dos importaciones simultáneas de la misma
+  // obra no la duplican: la segunda falla con P2002.
+  async create(
+    dto: CreateMediaDto,
+    { externalIds }: { externalIds?: ExternalRef[] } = {},
+  ) {
     const { type, details, genres, credits, slug, ...fields } = dto;
     await this.assertCreditsValid(type, credits);
     const genreIds = await this.resolveGenres(genres);
@@ -195,8 +202,10 @@ export class MediaService {
         [type.toLowerCase(), year].filter(Boolean).join('-'),
       ));
 
-    // Sin `details` se aplican los valores por defecto del esquema del tipo
-    const detailsData = DETAILS_SCHEMAS[type].parse(details ?? {});
+    // `details` ya viene validado por createMediaSchema (con sus valores por
+    // defecto). Sin `details` se aplican los del tipo. No se valida dos veces:
+    // la primera convierte las fechas a Date y la segunda las rechazaría.
+    const detailsData = details ?? DETAILS_SCHEMAS[type].parse({});
     const created = await this.prisma.media.create({
       data: {
         ...fields,
@@ -212,6 +221,7 @@ export class MediaService {
               })),
             }
           : undefined,
+        externalIds: externalIds?.length ? { create: externalIds } : undefined,
       },
       select: { id: true },
     });

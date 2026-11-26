@@ -239,7 +239,8 @@ model Creator {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  credits Credit[]
+  credits     Credit[]
+  externalIds CreatorExternalId[]
 
   @@index([name])
   @@map("creators")
@@ -316,4 +317,19 @@ model ExternalId {
   @@unique([provider, externalId])
   @@unique([mediaId, provider])
   @@map("external_ids")
+}
+
+// IDs de un creador en servicios externos, para no duplicarlo al importar
+// varias obras suyas (p. ej. una persona de TMDB)
+model CreatorExternalId {
+  id         String @id @default(uuid(7)) @db.Uuid
+  creatorId  String @db.Uuid
+  provider   String // "tmdb", "igdb", "deezer"...
+  externalId String
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+  @@unique([creatorId, provider])
+  @@map("creator_external_ids")
 }

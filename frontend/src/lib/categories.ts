@@ -12,6 +12,8 @@ export interface Category {
   description: string
   // Música tiene dos vistas: álbumes y canciones
   views: CategoryView[]
+  // Tipo que se puede buscar en TMDB y agregar al catálogo (/peliculas/agregar)
+  tmdbType?: 'MOVIE' | 'SERIES'
 }
 
 export const CATEGORIES: Category[] = [
@@ -20,12 +22,14 @@ export const CATEGORIES: Category[] = [
     label: 'Películas',
     description: 'Estrenos y clásicos del cine',
     views: [{ id: 'todas', label: 'Películas', types: ['MOVIE'] }],
+    tmdbType: 'MOVIE',
   },
   {
     slug: 'series',
     label: 'Series',
     description: 'Temporadas completas y en emisión',
     views: [{ id: 'todas', label: 'Series', types: ['SERIES'] }],
+    tmdbType: 'SERIES',
   },
   {
     slug: 'musica',

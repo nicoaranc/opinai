@@ -79,6 +79,14 @@ export function MediaDetailPage() {
 
           {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
 
+          {media.details?.trailerUrl && (
+            <p>
+              <a href={media.details.trailerUrl} target="_blank" rel="noreferrer">
+                Ver tráiler ↗
+              </a>
+            </p>
+          )}
+
           <dl className="facts">
             {media.releaseDate && (
               <Fact label="Estreno">{longDate(media.releaseDate)}</Fact>

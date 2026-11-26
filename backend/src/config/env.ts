@@ -28,6 +28,13 @@ export const envSchema = z
     COOKIE_SECURE: z.stringbool().optional(),
     // Número de proxies delante de la app (Render: 1) para obtener la IP real
     TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+    // Token de lectura de TMDB (películas y series). Sin él, la búsqueda y la
+    // importación desde TMDB responden 503; el resto de la app funciona igual.
+    TMDB_ACCESS_TOKEN: z
+      .string()
+      .trim()
+      .transform((value) => value || undefined)
+      .optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.CORS_ORIGINS?.length) {

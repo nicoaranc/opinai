@@ -1,7 +1,7 @@
 # Arquitectura de opinai
 
 > Documento vivo: se actualiza cada vez que se agrega o cambia una parte del sistema.
-> Última actualización: 2026-11-26 (frontend: categorías, listados, detalle de obras y reseñas)
+> Última actualización: 2026-11-26 (integración con TMDB: búsqueda e importación de películas y series)
 
 opinai es una plataforma de reseñas y valoraciones de **películas, series, música (álbumes y canciones) y videojuegos**.
 
@@ -27,13 +27,15 @@ flowchart LR
     U[Usuario] --> F["Frontend<br/>React + Vite<br/>(Render Static Site)"]
     F -->|"/api/* (rewrite, mismo origen)<br/>cookie de sesión"| B["Backend<br/>NestJS<br/>(Render Web Service)"]
     B -->|Prisma + pg| D[("PostgreSQL<br/>(Supabase)")]
-    B -.->|futuro| X["APIs externas<br/>TMDB, OMDb, MusicBrainz,<br/>IGDB, RAWG..."]
+    B -->|HTTPS + token| T["TMDB<br/>(películas y series)"]
+    B -.->|futuro| X["Deezer (música)<br/>IGDB (videojuegos)"]
+    F -.->|imágenes directas| CDN["CDN de imágenes<br/>image.tmdb.org"]
 ```
 
 - El **frontend** es una SPA estática. No accede a la base de datos ni a APIs externas con credenciales.
 - El **backend** expone una API REST bajo `/api`, contiene la lógica de negocio y es el único que habla con la base de datos (y en el futuro con las APIs externas).
 - El front llama al back **desde su mismo origen**: en local, Vite redirige `/api` a `localhost:3000`; en producción, una regla *rewrite* del Static Site envía `/api/*` al Web Service. Así la cookie de sesión funciona sin cookies de terceros (ver [§9](#9-decisiones-de-diseño)).
-- La **base de datos** es PostgreSQL. Las obras importadas de APIs externas se guardarán localmente.
+- La **base de datos** es PostgreSQL. Las obras importadas de APIs externas se guardan en ella; **las imágenes no**: se guarda su URL y el navegador las carga directo del CDN del proveedor.
 
 ## 2. Stack
 
@@ -72,8 +74,9 @@ opinai/
 │       ├── api/               ← client (fetch a /api), useApi, reviews, types
 │       ├── auth/              ← sesión (useAuth, AuthProvider) y apertura del login (useOpenAuthDialog)
 │       ├── lib/               ← categorías y formato (fechas, notas, etiquetas en español)
-│       ├── components/        ← Header, AuthDialog, MediaCard, Cover, Stars, StarRatingInput...
-│       └── pages/             ← HomePage, CategoryPage, NotFoundPage, media/ (detalle y reseñas)
+│       ├── lib/               ← (también images.ts: tamaños de las portadas de TMDB)
+│       ├── components/        ← Header, Footer, AuthDialog, MediaCard, Cover, Stars, StarRatingInput...
+│       └── pages/             ← HomePage, CategoryPage, ImportPage, NotFoundPage, media/ (detalle y reseñas)
 └── backend/
     ├── prisma.config.ts       ← config de la CLI de Prisma (schema, migraciones, seed, URL)
     ├── prisma/
@@ -92,6 +95,7 @@ opinai/
     │   ├── genres/            ← géneros
     │   ├── reviews/           ← reseñas y valoraciones
     │   ├── users/             ← perfiles públicos y edición del propio
+    │   ├── integrations/      ← APIs externas: MediaImporter (común) y tmdb/
     │   ├── health/            ← GET /api/health
     │   └── generated/prisma/  ← cliente Prisma generado (no se versiona)
     └── test/                  ← tests e2e
@@ -138,6 +142,7 @@ NestJS en modo **ESM**: los imports relativos terminan en `.js`. Todas las rutas
 | `GenresModule` | Géneros con cuántas obras tiene cada uno. Alta, edición y baja (ADMIN). |
 | `ReviewsModule` | Reseñas: listar las de una obra, crear la propia, editarla y borrarla. Mantiene las estadísticas de cada obra. Exporta `ReviewsService`. |
 | `UsersModule` | Perfil público de un usuario con estadísticas, sus reseñas y edición del perfil propio. |
+| `IntegrationsModule` | APIs externas. Por ahora TMDB: búsqueda e importación de películas y series. Detalles en [Integraciones](#integraciones-con-apis-externas). |
 | `HealthModule` | `GET /api/health` con Terminus: hace ping a la base de datos (`SELECT 1`, timeout de 3 s). Público y sin rate limit. |
 | `ObserveModule` | Telemetría de NestJS Observe, incluida en la plantilla. Inactiva hasta que se vincule con `npx @nestjs/observe link`. |
 
@@ -199,12 +204,36 @@ handler(@CurrentUser() user: PublicUser) {}
 
 `publicUserSelect` (`src/users/public-user.ts`) define los campos de un usuario que se pueden devolver. Nunca incluye `passwordHash`.
 
+### Integraciones con APIs externas
+
+**Flujo: importar bajo demanda.** El usuario busca en el proveedor, elige un resultado y la app lo guarda en la base con su ID externo. Desde ahí es una obra más del catálogo: se lista, se reseña y se muestra sin volver a llamar al proveedor.
+
+**Piezas** (`src/integrations/`):
+- `ImportedMedia` (`imported-media.ts`): formato común al que cada proveedor traduce sus datos (campos de la obra, detalles del tipo, nombres de géneros, créditos con su ID externo, IDs externos de la obra).
+- `MediaImporter` (`media-importer.service.ts`): guarda un `ImportedMedia`, sin saber de qué proveedor viene.
+  - **Es idempotente**: si el ID externo ya existe, devuelve la obra existente sin llamar al proveedor.
+  - **Géneros**: los busca por nombre (sin distinguir mayúsculas) o por slug, y crea los que falten. "Ciencia ficción" de TMDB coincide con el género del seed; "Suspense" o "Aventura" se crean nuevos.
+  - **Creadores**: los busca por su ID externo (`CreatorExternalId`) y crea los que falten, así un director no se duplica entre películas.
+  - **Valida** los datos con `createMediaSchema`, los mismos esquemas que la API. Si el proveedor manda algo inválido, responde `502` y lo registra en el log.
+  - **Concurrencia**: la obra y su ID externo se crean en la misma sentencia; si dos personas importan lo mismo a la vez, la segunda choca con la restricción única y recibe la obra ya creada (probado con 3 importaciones simultáneas).
+- Cada proveedor tiene su carpeta con cliente HTTP, tipos de sus respuestas, *mapper* (funciones puras, probadas sin red) y servicio.
+
+**TMDB** (`src/integrations/tmdb/`):
+- Autenticación con el *API Read Access Token* en la cabecera `Authorization: Bearer` (`TMDB_ACCESS_TOKEN`). El token nunca sale del back. Sin token, sus endpoints responden `503` y el resto de la app funciona igual.
+- Idioma `es-CL`. Si no hay sinopsis en español, se usa la de inglés.
+- IDs externos: la obra se guarda como `tmdb` / `movie:<id>` o `tv:<id>` (películas y series tienen numeraciones distintas en TMDB) y, si existe, `imdb` / `tt...`. Las personas como `tmdb` / `person:<id>`.
+- Datos que se toman:
+  - Películas: título, título original, sinopsis, estreno, póster, fondo, idioma, país, géneros, duración, clasificación por edad (Chile, o EE. UU. si Chile no tiene), tráiler de YouTube (en español si hay), dirección y hasta 3 guionistas.
+  - Series: lo mismo, más estado, temporadas, episodios, cadena, fecha de fin (solo si terminó) y creadores (`SHOWRUNNER`).
+- Imágenes: se guarda la URL de TMDB con el póster en `w500`, el fondo en `w1280` y las fotos de personas en `w185`. El front cambia el tamaño en la URL según dónde la muestre (ver [Frontend](#5b-frontend)).
+- Errores: `404` si el ID no existe en TMDB; `503` si TMDB no responde (8 s de espera), limita las peticiones o rechaza el token (esto último se registra en el log).
+
 ### Prisma 7
 
 - `schema.prisma` no lleva URL. La CLI la toma de `prisma.config.ts` (`DIRECT_URL`) y la app la pasa al adapter en `PrismaService` (`DATABASE_URL`).
 - El cliente se genera en `src/generated/prisma` con el generator `prisma-client` (ESM). Se importa desde `../generated/prisma/client.js`.
 - `migrate dev` no regenera el cliente. Después de migrar hay que ejecutar `npm run db:generate`.
-- **Seed** (`prisma/seed.ts`, se ejecuta con tsx): **borra todos los datos** y crea 3 usuarios (`admin@opinai.local` con rol ADMIN, `ana@opinai.local` y `bruno@opinai.local`, todos con la contraseña **`opinai123`**), 7 géneros, 5 creadores, 11 obras (2 películas, 1 serie, 1 álbum con 6 canciones, 1 juego) y 9 reseñas (una sin nota), y calcula las estadísticas de cada obra. Se puede repetir sin problemas. **Solo corre contra una base local** (`localhost`, `127.0.0.1` o `::1`) y nunca con `NODE_ENV=production` (`prisma/seed-guard.ts`). Así, aunque el `.env` local apunte a Supabase, no puede borrar producción ni crear un ADMIN con contraseña conocida.
+- **Seed** (`prisma/seed.ts`, se ejecuta con tsx): **borra todos los datos** y crea 3 usuarios (`admin@opinai.local` con rol ADMIN, `ana@opinai.local` y `bruno@opinai.local`, todos con la contraseña **`opinai123`**), 7 géneros, 5 creadores, 11 obras (2 películas, 1 serie, 1 álbum con 6 canciones, 1 juego) y 9 reseñas (una sin nota), y calcula las estadísticas de cada obra. *Parásitos*, *La llegada*, *Breaking Bad* y sus directores o creadores llevan su **ID real de TMDB**, así que importarlos devuelve la obra del seed en vez de duplicarla. Se puede repetir sin problemas. **Solo corre contra una base local** (`localhost`, `127.0.0.1` o `::1`) y nunca con `NODE_ENV=production` (`prisma/seed-guard.ts`). Así, aunque el `.env` local apunte a Supabase, no puede borrar producción ni crear un ADMIN con contraseña conocida.
 
 ### Scripts
 
@@ -230,6 +259,7 @@ SPA de React con Vite y React Router. Permite explorar el catálogo por categor�
 |---|---|---|
 | `/` | `HomePage` | Titular y las 4 categorías: Películas, Series, Música y Videojuegos. |
 | `/peliculas`, `/series`, `/musica`, `/videojuegos` | `CategoryPage` | Rejilla de obras del tipo, con orden (`?orden=recent\|rating\|popular\|title`) y paginación (`?pagina=`, 24 por página). Música tiene dos pestañas, Álbumes y Canciones (`?ver=albumes\|canciones`). Las categorías se definen en `src/lib/categories.ts`. |
+| `/peliculas/agregar`, `/series/agregar` | `ImportPage` | Buscador de TMDB (con sesión). Cada resultado tiene "Agregar", que importa la obra y lleva a su página, o "Ver" si ya está en el catálogo. La página de la categoría enlaza aquí con "+ Agregar desde TMDB". |
 | `/obra/:slug` | `MediaDetailPage` | Portada, nota promedio, sinopsis, créditos, géneros y datos del tipo (duración, temporadas, plataformas...). Canciones del álbum o álbumes de la canción, con enlaces. Tu reseña y la lista de reseñas. |
 | cualquier otra | `NotFoundPage` | "No encontrado". |
 
@@ -242,7 +272,10 @@ La cabecera tiene enlaces a las 4 categorías en todas las páginas.
 - Al guardar o borrar, se vuelve a pedir el detalle (nota promedio y `myReview`) y la lista de reseñas.
 - **La lista** (`ReviewList`) se ordena por fecha o nota, filtra "solo con texto" y pagina de 10 en 10. Las reseñas con spoilers ocultan el texto hasta pulsar "Mostrar".
 - Las notas se muestran como estrellas (redondeo a media estrella) y como número de 0 a 5 con un decimal ("4,8").
-- Las obras sin portada muestran la inicial del título sobre un color según el tipo (`Cover`).
+- Las obras sin portada muestran la inicial del título sobre un color según el tipo (`Cover`). Lo mismo si la imagen no carga (por ejemplo, si el proveedor la borró).
+- **Tamaño de las portadas**: `imageSrc()` (`src/lib/images.ts`) cambia el tamaño en las URLs de TMDB: `w185` en resultados de búsqueda, `w342` en la rejilla y `w500` en el detalle. Las URLs de otros orígenes se usan tal cual.
+- El detalle enlaza al tráiler si la obra lo tiene.
+- **Pie de página** con la atribución que exige TMDB ("Este producto usa la API de TMDB, pero no está avalado ni certificado por TMDB").
 
 ### Datos
 
@@ -287,6 +320,7 @@ erDiagram
     Creator ||--o{ Credit : participa
     Media }o--o{ Genre : clasifica
     Media ||--o{ ExternalId : "se identifica en"
+    Creator ||--o{ CreatorExternalId : "se identifica en"
 ```
 
 | Modelo | Tabla | Propósito |
@@ -300,7 +334,8 @@ erDiagram
 | `Credit` | `credits` | Une `Media` con `Creator` y un rol: `DIRECTOR`, `SHOWRUNNER`, `WRITER`, `PRIMARY_ARTIST`, `FEATURED_ARTIST`, `PRODUCER`, `DEVELOPER`, `PUBLISHER`. |
 | `Genre` | `genres` | Géneros (relación muchos a muchos con `Media`). |
 | `Review` | `reviews` | Una por usuario y obra. Tiene **nota, texto o ambos**: `rating` (1–10, equivale a 0,5–5 estrellas) y `body` son opcionales, pero no pueden faltar los dos. Un `title` exige `body`. Las reseñas sin nota no cuentan en el promedio. La base lo garantiza con dos `CHECK` (`reviews_rating_range`, `reviews_rating_or_body`). |
-| `ExternalId` | `external_ids` | IDs de la obra en servicios externos (`tmdb`, `igdb`…). Todavía no se usa. |
+| `ExternalId` | `external_ids` | IDs de la obra en servicios externos: `tmdb` (`movie:496243`, `tv:1396`), `imdb` (`tt6751668`). Único por proveedor e ID, y una obra tiene como mucho uno por proveedor. |
+| `CreatorExternalId` | `creator_external_ids` | Lo mismo para creadores (`tmdb` / `person:21684`), para no duplicarlos entre importaciones. |
 
 ## 7. API
 
@@ -350,6 +385,15 @@ Base: `/api`. 🔓 = pública, 🔒 = requiere sesión.
 | `GET` | `/api/users/:username/reviews` | 🔓 | Sus reseñas con la obra. Mismos `sort` y `withText` que arriba, más `type`. |
 | `PATCH` | `/api/users/me` | 🔒 | Edita el perfil propio: `displayName`, `bio`, `avatarUrl` (`""` o `null` los borra). |
 
+### Integraciones
+
+| Método | Ruta | Acceso | Descripción |
+|---|---|---|---|
+| `GET` | `/api/tmdb/search` | 🔒 | Busca en TMDB. Query: `type` (`MOVIE` o `SERIES`), `q`, `page` (TMDB devuelve 20 por página). Cada resultado: `{ tmdbId, type, title, originalTitle, year, overview, posterUrl, importedSlug }`; `importedSlug` indica si ya está en el catálogo. Límite: 60 por minuto. |
+| `POST` | `/api/tmdb/imports` | 🔒 | Importa `{ type, tmdbId }`. `201` `{ created: true, media }` si se agregó ahora, `200` `{ created: false, media }` si ya estaba. `media` tiene la forma del detalle. Límite: 30 cada 10 minutos. `404` si no existe en TMDB, `503` si TMDB no está disponible o falta el token. |
+
+Requieren sesión para no gastar la cuota de TMDB con visitas anónimas, pero **cualquier usuario** puede importar, no solo los ADMIN.
+
 ### Formas de las respuestas
 
 - `user` (auth) = `{ id, email, username, displayName, avatarUrl, bio, role, createdAt }`. Solo se devuelve al propio usuario.
@@ -389,6 +433,7 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 | `CORS_ORIGINS` | Orígenes de confianza, separados por comas: CORS y protección CSRF. **Obligatoria en producción**; fuera de ella vale `http://localhost:5173` por defecto | `http://localhost:5173` | URL del front en Render |
 | `COOKIE_SECURE` | Cookie de sesión solo por HTTPS (`true`/`false`). Si no se define: `true` en producción | — | — |
 | `TRUST_PROXY` | Número de proxies delante de la app, para obtener la IP real (por defecto `0`). Con `0` en producción se muestra un aviso al arrancar | — | `1` (**verificar al desplegar** cuántos saltos hay) |
+| `TMDB_ACCESS_TOKEN` | *API Read Access Token* de TMDB (themoviedb.org → Settings → API). Opcional: sin él, `/api/tmdb/*` responde `503`. Vacío cuenta como no definido. **No se sube al repo.** | el tuyo | el mismo, como variable de Render |
 | `OBSERVE_APP_KEY` / `OBSERVE_APP_SECRET` | NestJS Observe (opcional) | — | — |
 
 ## 9. Decisiones de diseño
@@ -412,6 +457,9 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - **El front y el back comparten origen** (proxy de Vite en local, rewrite de Render en producción). Los subdominios de `onrender.com` cuentan como sitios distintos, así que sin esto la cookie `SameSite=Lax` no se enviaría.
 - **Seguro por defecto**: toda ruta nueva exige sesión salvo que se marque `@Public()`.
 - **El front tiene pocas dependencias**: React Router para las rutas y nada más. Los datos se piden con un hook propio (`useApi`) en vez de React Query, y los estilos son CSS plano con variables. Si aparecen necesidades como caché entre páginas, se puede pasar a React Query.
+- **Las imágenes de los proveedores no se descargan ni se guardan**: se guarda su URL y el navegador las pide directo a su CDN, igual en local y en producción. Solo se usaría almacenamiento propio (Supabase Storage) para imágenes que suban los usuarios.
+- **Una API principal por tipo de medio**: TMDB para películas y series, Deezer para música e IGDB para videojuegos (estas dos, pendientes). Todas pasan por el mismo `MediaImporter`.
+- **Cualquier usuario con sesión puede importar**, para que el catálogo crezca con lo que la gente quiere reseñar. Los datos vienen de TMDB, así que el riesgo de abuso es bajo; hay rate limit.
 - **Las rutas del front están en español** (`/peliculas`, `/obra/:slug`), las de la API en inglés (`/api/media`).
 - **Fallar al arrancar antes que arrancar inseguro.** `NODE_ENV` es obligatoria porque de ella dependen la cookie segura y otras protecciones, y `CORS_ORIGINS` es obligatoria en producción.
 
@@ -425,6 +473,10 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - **No hay cabeceras de seguridad** (`helmet`) ni limpieza periódica de sesiones caducadas.
 - **La búsqueda usa `ILIKE`** (`contains` sin distinguir mayúsculas) sin índice de texto: no ignora tildes ("parasitos" no encuentra "Parásitos") y se volverá lenta con un catálogo grande. Mejora futura: `pg_trgm` o búsqueda de texto completo con `unaccent`.
 - **Borrar una obra borra sus reseñas** (cascada), sin papelera.
+- **Las obras importadas no se actualizan**: si en TMDB cambia algo (una serie suma temporadas), la copia local queda igual. Falta un refresco periódico o manual.
+- **Géneros duplicados por nombre**: TMDB llama "Suspense" a lo que el seed llama "Thriller", y quedan como dos géneros distintos.
+- **Atribución en texto**: el pie de página cita a TMDB con texto y enlace, pero sus guías piden además su logo.
+- **Términos de uso de TMDB**: guardamos sus datos en nuestra base; hay que confirmar en sus términos que está permitido y por cuánto tiempo.
 
 ## 10. Estado y próximos pasos
 
@@ -437,6 +489,7 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [x] Autenticación: registro, login, logout, sesión actual, roles, rate limit y protección CSRF
 - [x] API REST: catálogo (obras, creadores, géneros), reseñas con nota opcional, perfiles de usuario y Swagger
 - [x] Frontend: categorías, listados con orden y paginación, detalle de obras y reseñas (crear, editar, borrar), registro e inicio de sesión
+- [x] Integración con TMDB: búsqueda e importación de películas y series, desde la API y desde el front
 - [x] Endurecimiento: `NODE_ENV` obligatoria, seed solo en local, argon2 con límite de memoria, bloqueo por cuenta y `CORS_ORIGINS` obligatoria en producción
 
 **Pendiente**
@@ -444,5 +497,5 @@ Backend (`backend/.env`, plantilla en `backend/.env.example`). Se validan al arr
 - [ ] Script para dar rol ADMIN a un usuario (necesario antes de desplegar)
 - [ ] Recuperar contraseña y verificar email (requiere servicio de correo)
 - [ ] Login con Google o GitHub
-- [ ] Integración con APIs externas
+- [ ] Integraciones con Deezer (música) e IGDB (videojuegos)
 - [ ] Despliegue en Render y Supabase

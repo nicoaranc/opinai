@@ -88,24 +88,45 @@ async function main() {
     name: string,
     kind: CreatorKind,
     country: string,
-  ) => prisma.creator.create({ data: { slug, name, kind, country } });
+    // ID real en TMDB: al importar sus obras se reutiliza este creador
+    tmdbPersonId?: number,
+  ) =>
+    prisma.creator.create({
+      data: {
+        slug,
+        name,
+        kind,
+        country,
+        externalIds: tmdbPersonId
+          ? {
+              create: {
+                provider: 'tmdb',
+                externalId: `person:${tmdbPersonId}`,
+              },
+            }
+          : undefined,
+      },
+    });
   const bong = await creator(
     'bong-joon-ho',
     'Bong Joon-ho',
     CreatorKind.PERSON,
     'KR',
+    21684,
   );
   const gilligan = await creator(
     'vince-gilligan',
     'Vince Gilligan',
     CreatorKind.PERSON,
     'US',
+    66633,
   );
   const villeneuve = await creator(
     'denis-villeneuve',
     'Denis Villeneuve',
     CreatorKind.PERSON,
     'CA',
+    137427,
   );
   const radiohead = await creator(
     'radiohead',
@@ -125,6 +146,8 @@ async function main() {
     data: {
       type: MediaType.MOVIE,
       slug: 'parasite-2019',
+      // ID real en TMDB: importar esta obra devuelve la del seed
+      externalIds: { create: { provider: 'tmdb', externalId: 'movie:496243' } },
       title: 'Parásitos',
       originalTitle: '기생충',
       synopsis:
@@ -147,6 +170,8 @@ async function main() {
     data: {
       type: MediaType.MOVIE,
       slug: 'arrival-2016',
+      // ID real en TMDB: importar esta obra devuelve la del seed
+      externalIds: { create: { provider: 'tmdb', externalId: 'movie:329865' } },
       title: 'La llegada',
       originalTitle: 'Arrival',
       synopsis:
@@ -167,6 +192,8 @@ async function main() {
     data: {
       type: MediaType.SERIES,
       slug: 'breaking-bad',
+      // ID real en TMDB: importar esta obra devuelve la del seed
+      externalIds: { create: { provider: 'tmdb', externalId: 'tv:1396' } },
       title: 'Breaking Bad',
       synopsis:
         'Un profesor de química con un diagnóstico terminal empieza a fabricar metanfetamina.',
