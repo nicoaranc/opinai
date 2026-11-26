@@ -136,7 +136,7 @@ NestJS en modo **ESM**: los imports relativos terminan en `.js`. Todas las rutas
 - **Errores**: `AllExceptionsFilter` (`APP_FILTER`) da a todas las respuestas de error la misma forma (ver [§7](#7-api)). Traduce errores de Prisma: `P2002` (único duplicado) → `409`, `P2003` (FK inválida) → `409`, `P2025` (no encontrado) → `404`. Cualquier otro error responde `500` con un mensaje genérico y se registra en el log, sin exponer detalles.
 - **Guards globales**, en este orden:
   1. `ThrottlerGuard`: rate limiting.
-  2. `OriginGuard`: CSRF. Rechaza con `403` las peticiones `POST`, `PUT`, `PATCH` y `DELETE` cuyo `Origin` no esté en `CORS_ORIGINS`.
+  2. `OriginGuard`: CSRF. Rechaza con `403` las peticiones `POST`, `PUT`, `PATCH` y `DELETE` cuyo `Origin` no esté en `CORS_ORIGINS` ni sea el de la propia API (así Swagger puede hacer login).
   3. `SessionGuard`: carga el usuario desde la cookie y **exige sesión en todas las rutas** salvo las marcadas con `@Public()`. Aplica `@Roles(...)`.
 - **CORS**: solo se aceptan los orígenes de `CORS_ORIGINS`, con `credentials: true`.
 - **Proxy**: `trust proxy` = `TRUST_PROXY`, para que `req.ip` (rate limit y sesiones) sea la IP real detrás de Render.

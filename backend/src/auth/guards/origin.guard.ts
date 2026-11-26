@@ -28,6 +28,8 @@ export class OriginGuard implements CanActivate {
     const origin = req.headers.origin;
     // Sin Origin no es un navegador (curl, apps), que siempre lo envía en estos métodos
     if (!origin || this.trusted.has(origin)) return true;
+    // El mismo origen que la API (p. ej. Swagger en /api/docs) no es CSRF
+    if (origin === `${req.protocol}://${req.get('host')}`) return true;
     throw new ForbiddenException('Origen no permitido');
   }
 }

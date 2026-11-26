@@ -34,7 +34,21 @@ describe('OriginGuard', () => {
   } as unknown as ConfigService<Env, true>;
   const guard = new OriginGuard(config);
   const check = (method: string, origin?: string) =>
-    guard.canActivate(context({ method, headers: { origin } }).ctx);
+    guard.canActivate(
+      context({
+        method,
+        headers: { origin },
+        protocol: 'http',
+        get: () => 'localhost:3000',
+      }).ctx,
+    );
+
+  it('deja pasar escrituras desde el mismo origen que la API (Swagger)', () => {
+    expect(check('POST', 'http://localhost:3000')).toBe(true);
+    expect(() => check('POST', 'https://localhost:3000')).toThrow(
+      ForbiddenException,
+    );
+  });
 
   it('deja pasar métodos de lectura desde cualquier origen', () => {
     expect(check('GET', 'https://otro.com')).toBe(true);
